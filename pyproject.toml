@@ -15,17 +15,35 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 dependencies = [
-    "docopt>=0.6.2",
-    "matplotlib>=3.10.1",
-    "numpy>=2.2.4",
-    "pillow>=11.2.1",
-    "scipy>=1.15.2",
-    "tifffile>=2025.3.30",
-    "tqdm>=4.67.1",
+    # REMOVE: "docopt>=0.6.2",
+    "typer>=0.9.0", # Add Typer
+    "matplotlib>=3.7,<4.0", # Keep relaxed dependencies
+    "numpy>=1.21,<3.0",
+    "pillow>=10.0,<12.0",
+    "scipy>=1.7,<2.0",
+    "tifffile>=2023.1.1",
+    "tqdm>=4.64",
+    # Add typing_extensions if you used it in cli.py for compatibility
+    "typing_extensions>=4.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",        # Add pytest with a reasonable minimum version
+    "pytest-html>=4.0",    # Add pytest-html for HTML reports
+    "pytest-xdist>=3.0",   # Add pytest-xdist for parallel test execution
+    "pytest-cov>=3.0",      # Add pytest-cov for coverage reporting
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "unit: mark test as a unit test (fast, isolated)",
+    "integration: mark test as an integration test (slower, end-to-end)",
 ]
 
 [project.scripts]
-pixelpacker = "pixelpacker.cli:main"
+# UPDATE this line to point to the Typer app instance:
+pixelpacker = "pixelpacker.cli:app" # Change from cli:main to cli:app
 
 [project.urls]
 "Homepage" = "https://github.com/bscott711/PixelPacker"
