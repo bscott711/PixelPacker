@@ -12,19 +12,26 @@ from pathlib import Path
 from typing import Any, DefaultDict, Dict, List, Optional, Tuple
 
 import numpy as np
-import tifffile
+# import tifffile # Not directly used in this file anymore
 from tqdm import tqdm
 
-from .io_utils import extract_volume, process_channel
-from .stretch import calculate_limits_only, ContrastLimits
-from .data_models import VolumeLayout, ChannelEntry
+# Import necessary functions/classes from io_utils
+from .io_utils import extract_original_volume
+from .io_utils import find_z_crop_range_projection # Use new function
+from .io_utils import process_channel # Expects globally cropped vol
 
+# Import other local modules
+from .stretch import ContrastLimits, calculate_limits_only
+from .data_models import ChannelEntry, VolumeLayout
+
+# --- Setup & Configuration ---
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-log = logging.getLogger(__name__)
+log = logging.getLogger(__name__) # Use module-specific logger
 
-# --- Config and Task Definitions (Unchanged) ---
+# --- Dataclasses ---
 @dataclass
 class PreprocessingConfig:
+    """Configuration settings for the preprocessing pipeline."""
     input_folder: Path
     output_folder: Path
     stretch_mode: str
@@ -36,411 +43,520 @@ class PreprocessingConfig:
 
 @dataclass
 class ProcessingTask:
+    """Represents a single file to be processed."""
     time_id: str
     channel_entry: ChannelEntry
     config: PreprocessingConfig
 
 @dataclass
 class ProcessingResult:
+    """Result metadata for a single successfully processed file."""
+    # No per-file z_crop_range needed for global cropping
     time_id: str
     channel: int
-    filename: str
-    p_low: float
-    p_high: float
-    z_crop_range: List[int]
+    filename: str # Output filename
+    p_low: float # Contrast limit low used/calculated
+    p_high: float # Contrast limit high used/calculated
+
+@dataclass
+class CropRangeInfo:
+    """Holds results from Pass 0 Z-range finding task."""
+    path: Path
+    z_start: int
+    z_end: int
+    width: Optional[int] = None
+    height: Optional[int] = None
 
 @dataclass
 class LimitsPassResult:
-     time_id: str
-     channel: int
-     limits: ContrastLimits
-     cropped_volume: Optional[np.ndarray]
-     z_range: Optional[Tuple[int, int]]
+    """Holds results from Pass 1 limit calculation task."""
+    time_id: str
+    channel: int
+    limits: ContrastLimits
+    globally_cropped_volume: Optional[np.ndarray] # Keep the volume for Pass 2
+    global_z_range: Tuple[int, int] # Keep the range used
 
 TimepointsDict = DefaultDict[str, List[ChannelEntry]]
-TimepointResult = Dict[str, Any]
+TimepointResult = Dict[str, Any] # For final metadata structure
 
+# === Pass 0: Determine Global Z-Crop Range ===
 
-# --- Modified Layout Determination ---
-def _determine_layout(first_valid_path: Path) -> Optional[VolumeLayout]:
-    """Determines layout based on the shape of the ORIGINAL volume."""
+def _task_find_local_z_range(task: ProcessingTask) -> Optional[CropRangeInfo]:
+    """
+    Pass 0 Task: Extracts original volume, finds its local Z range using
+    projections, and dimensions.
+    """
+    ch_entry = task.channel_entry
+    file_path = ch_entry["path"]
+    log.debug(f"Pass 0 task started for T:{task.time_id} C:{ch_entry['channel']} ({file_path.name})")
+    original_volume = None
     try:
-        log.info(f"Determining layout from ORIGINAL shape of: {first_valid_path.name}")
-        # Option 2: Read the volume but DON'T crop it here
-        with tifffile.TiffFile(str(first_valid_path)) as tif:
-            original_vol: np.ndarray = tif.asarray()
-        original_vol = np.squeeze(original_vol)
-        # Apply same reshape logic as extract_volume
-        if original_vol.ndim == 5:
-             # --- FIX E701: Split lines ---
-             if original_vol.shape[0] == 1 and original_vol.shape[2] == 1:
-                 _, z, _, y, x = original_vol.shape
-                 original_vol = original_vol.reshape((z, y, x))
-             # --- End FIX ---
-             else:
-                 raise ValueError("Unsupported 5D for layout")
-        elif original_vol.ndim == 4:
-             # --- FIX E701: Split lines ---
-             if 1 in original_vol.shape:
-                 original_vol = original_vol.reshape([s for s in original_vol.shape if s != 1])
-                 if original_vol.ndim != 3:
-                     raise ValueError("Cannot reshape 4D to 3D for layout")
-             else:
-                 # --- FIX E701: Split lines ---
-                 raise ValueError("Unsupported 4D for layout")
-             # --- End FIX ---
-        elif original_vol.ndim == 2:
-             original_vol = original_vol[np.newaxis, :, :]
-        elif original_vol.ndim != 3:
-             raise ValueError(f"Unsupported shape for layout: {original_vol.shape}")
+        original_volume = extract_original_volume(file_path)
+        if original_volume is None:
+            # Error logged in extract func
+            return None
 
-        d, h, w = original_vol.shape
-        if d == 0:
-             raise ValueError("Original volume depth is 0. Cannot determine layout.")
+        # Use new projection-based function
+        z_start, z_end = find_z_crop_range_projection(
+            volume=original_volume,
+            threshold=task.config.z_crop_threshold,
+            debug=task.config.debug,
+            output_folder=task.config.output_folder,
+            filename_prefix=f"T{task.time_id}_C{ch_entry['channel']}"
+        )
+
+        if original_volume.ndim != 3:
+            log.warning(f"Pass 0 - Vol shape {original_volume.shape} not 3D for T:{task.time_id} C:{ch_entry['channel']}. Cannot get W/H.")
+            return None
+        _, h, w = original_volume.shape
+
+        log.debug(f"Pass 0 - Found local range [{z_start}-{z_end}], W={w}, H={h} for T:{task.time_id} C:{ch_entry['channel']}")
+        return CropRangeInfo(path=file_path, z_start=z_start, z_end=z_end, width=w, height=h)
+    except Exception as e:
+        log.error(f"❌ Pass 0 - Unexpected error T:{task.time_id} C:{ch_entry['channel']}: {e}", exc_info=task.config.debug)
+        return None
+    finally:
+        # Ensure memory is freed
+        if original_volume is not None:
+            del original_volume
+
+def _determine_global_z_crop_and_dims(
+    tasks: List[ProcessingTask], config: PreprocessingConfig
+) -> Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]]]:
+    """Pass 0 Orchestrator: Finds global Z-crop range and base W/H across all tasks."""
+    log.info(" Kicking off Pass 0: Determining global Z-crop range & dimensions...")
+    num_tasks = len(tasks)
+    min_z_start = float('inf')
+    max_z_end = float('-inf')
+    base_width: Optional[int] = None
+    base_height: Optional[int] = None
+    error_tasks = 0
+    processed_tasks = 0
+
+    with ThreadPoolExecutor(max_workers=config.max_threads, thread_name_prefix="Pass0_ZRange") as executor:
+        futures = {executor.submit(_task_find_local_z_range, task): task for task in tasks}
+        with tqdm(total=num_tasks, desc=" 🔪 Pass 0/3: Find Z Range & Dims") as pbar:
+            for future in as_completed(futures):
+                task = futures[future]
+                try:
+                    result: Optional[CropRangeInfo] = future.result()
+                    if result and result.width is not None and result.height is not None:
+                        processed_tasks += 1
+                        min_z_start = min(min_z_start, result.z_start)
+                        max_z_end = max(max_z_end, result.z_end)
+                        if base_width is None:
+                            base_width = result.width
+                            base_height = result.height
+                            log.info(f"Pass 0 - Base dims W={base_width}, H={base_height} from {result.path.name}")
+                    elif result:
+                         log.warning(f"Pass 0 - Task for {task.channel_entry['path'].name} missing W/H.")
+                         error_tasks += 1
+                    else:
+                        error_tasks += 1
+                except Exception as exc:
+                    log.error(f"❌ Pass 0 - Error T:{task.time_id} C:{task.channel_entry['channel']}: {exc}", exc_info=config.debug)
+                    error_tasks += 1
+                finally:
+                    pbar.update(1)
+
+    if error_tasks > 0:
+        log.warning(f"Pass 0 completed with {error_tasks} errors during Z-range/dimension finding.")
+    if processed_tasks == 0:
+        log.error("❌ Pass 0 failed: Could not determine Z-range or dimensions from any file.")
+        return None, None # Critical failure
+    if base_width is None or base_height is None:
+        log.error("❌ Pass 0 failed: Could not determine base width/height for layout.")
+        return None, None # Critical failure
+    if min_z_start == float('inf') or max_z_end == float('-inf'):
+        log.error(f"❌ Pass 0 failed: Invalid Z-range (inf values) calculated [{min_z_start}, {max_z_end}]. Check threshold/data.")
+        return None, (base_width, base_height) # Return dims but signal Z failure
+
+    global_z_start = int(min_z_start)
+    global_z_end = int(max_z_end)
+
+    # Final sanity check on Z range
+    if global_z_start > global_z_end:
+        log.error(f"❌ Pass 0 failed: Final calculated min_z_start ({global_z_start}) > max_z_end ({global_z_end}).")
+        return None, (base_width, base_height)
+
+    log.info(f"✅ Pass 0 finished. Global Z-crop range: [{global_z_start}, {global_z_end}]. Base Dims: W={base_width}, H={base_height}")
+    return (global_z_start, global_z_end), (base_width, base_height)
+
+# === Layout Determination ===
+def _determine_layout(
+    base_width: int, base_height: int, global_z_range: Tuple[int, int]
+) -> Optional[VolumeLayout]:
+    """Determines the tile layout based on base W/H and the globally cropped depth."""
+    try:
+        global_z_start, global_z_end = global_z_range
+        # Calculate depth based on the *inclusive* global range
+        d = global_z_end - global_z_start + 1
+
+        if d <= 0:
+            log.error(f"Layout failed: Global cropped depth is <= 0 ({d}) from range {global_z_range}.")
+            return None
+        if base_width <= 0 or base_height <= 0:
+            log.error(f"Layout failed: Invalid base dimensions W={base_width}, H={base_height}.")
+            return None
+
+        log.info(f"Determining layout for W={base_width}, H={base_height}, Global Depth={d}")
 
         cols = math.ceil(math.sqrt(d))
         rows = math.ceil(d / cols)
-        tile_w = cols * w
-        tile_h = rows * h
+        tile_w = cols * base_width
+        tile_h = rows * base_height
+
         layout = VolumeLayout(
-            width=w, height=h, depth=d,
+            width=base_width, height=base_height, depth=d, # Depth IS the globally cropped depth
             cols=cols, rows=rows,
             tile_width=tile_w, tile_height=tile_h
         )
-        log.info(f"Layout set (based on ORIGINAL): Volume({w}x{h}x{d}), Tile({tile_w}x{tile_h}), Grid({cols}x{rows})")
+        log.info(f"Layout determined: Volume({base_width}x{base_height}x{d}), Tile({tile_w}x{tile_h}), Grid({cols}x{rows})")
         return layout
-    except FileNotFoundError:
-        log.error(f"Layout determination failed: File not found {first_valid_path}")
-        return None
-    except ValueError as e:
-        log.error(f"Layout determination failed for {first_valid_path.name}: {e}")
-        return None
     except Exception as e:
-        log.error(f"Error processing layout from {first_valid_path.name}: {e}", exc_info=True)
+        log.error(f"❌ Unexpected error during layout determination: {e}", exc_info=True)
         return None
 
-# --- Modified Task Preparation (Unchanged from previous version) ---
-def _prepare_tasks(
+# === Task Preparation ===
+def _prepare_tasks_and_layout(
     config: PreprocessingConfig,
     timepoints_data: TimepointsDict
-) -> Tuple[Optional[VolumeLayout], List[ProcessingTask]]:
-    """Determines layout (based on original first file) and creates processing tasks."""
+) -> Tuple[Optional[Tuple[int, int]], Optional[VolumeLayout], List[ProcessingTask]]:
+    """Orchestrates Pass 0 (Z-range/dims), determines layout, and returns final tasks."""
     layout: Optional[VolumeLayout] = None
+    global_z_range: Optional[Tuple[int, int]] = None
+    base_dims: Optional[Tuple[int, int]] = None
     tasks_to_submit: List[ProcessingTask] = []
     sorted_time_ids = sorted(timepoints_data.keys())
 
     if not sorted_time_ids:
         log.warning("No timepoints found after parsing. No tasks to prepare.")
-        return None, []
+        return None, None, []
 
-    log.info("🔍 Analyzing layout (based on first file's ORIGINAL shape) and preparing tasks...")
-
-    first_file_path: Optional[Path] = None
-    for time_id in sorted_time_ids:
-        if timepoints_data[time_id]:
-            first_file_path = timepoints_data[time_id][0]["path"]
-            break
-
-    if first_file_path is None:
-        log.error("❌ No valid TIFF files found in any timepoint to determine layout.")
-        return None, []
-
-    layout = _determine_layout(first_file_path)
-    if layout is None:
-        log.error("❌ Could not determine volume layout from first file. Aborting.")
-        return None, []
-
+    # Create tasks list first (needed for Pass 0)
     for time_id in sorted_time_ids:
         for entry in timepoints_data[time_id]:
-            task = ProcessingTask(
-                time_id=time_id,
-                channel_entry=entry,
-                config=config,
-            )
-            tasks_to_submit.append(task)
+            tasks_to_submit.append(ProcessingTask(time_id, entry, config))
 
     if not tasks_to_submit:
-        log.error("❌ No valid processing tasks generated despite layout success. Aborting.")
-        return layout, []
+        log.error("❌ No tasks could be created.")
+        return None, None, []
 
-    log.info(f"✅ Prepared {len(tasks_to_submit)} tasks. Layout determined: {layout}")
-    return layout, tasks_to_submit
-
-
-# --- Helper Function _task_calculate_limits (Unchanged from previous version) ---
-def _task_calculate_limits(task: ProcessingTask) -> Optional[LimitsPassResult]:
-    """Pass 1: Extracts/crops volume and calculates limits."""
+    # --- Run Pass 0 ---
     try:
-        cropped_volume, z_range = extract_volume(
-            task.channel_entry["path"], task.config.z_crop_threshold
-        )
-        if cropped_volume is None or z_range is None:
-             log.error(f"Failed extraction/crop for T:{task.time_id} C:{task.channel_entry['channel']}")
-             return None
+        global_z_range, base_dims = _determine_global_z_crop_and_dims(tasks_to_submit, config)
+    except Exception as e:
+         # Catch potential unexpected errors from the orchestrator itself
+         log.error(f"❌ Critical unexpected error during Pass 0 orchestration: {e}", exc_info=config.debug)
+         return None, None, []
 
-        if cropped_volume.size == 0:
-             log.warning(f"Volume empty after crop for T:{task.time_id} C:{task.channel_entry['channel']}. Skipping limit calc.")
-             return None
+    if global_z_range is None or base_dims is None:
+         log.error("Aborting: Failed to determine global Z range or base dimensions in Pass 0.")
+         return global_z_range, None, [] # Return partial results if needed
 
-        limits = calculate_limits_only(cropped_volume, task.config.stretch_mode)
+    # --- Determine Layout ---
+    layout = _determine_layout(base_dims[0], base_dims[1], global_z_range)
+    if layout is None:
+        log.error("❌ Could not determine volume layout after finding global Z range/dims. Aborting.")
+        return global_z_range, None, []
 
+    log.info(f"✅ Prepared {len(tasks_to_submit)} tasks. Layout determined. Global Z Range: {global_z_range}")
+    # Return the original task list, they are needed for Pass 1/2
+    return global_z_range, layout, tasks_to_submit
+
+# === Pass 1: Calculate Contrast Limits ===
+def _task_calculate_limits(
+    task: ProcessingTask, global_z_range: Tuple[int, int]
+) -> Optional[LimitsPassResult]:
+    """
+    Pass 1 Task: Extracts original volume, applies GLOBAL crop, calculates
+    contrast limits, and KEEPS the globally cropped volume for Pass 2.
+    """
+    ch_entry = task.channel_entry
+    file_path = ch_entry["path"]
+    log.debug(f"Pass 1 task started for T:{task.time_id} C:{ch_entry['channel']}")
+    original_volume = None
+    globally_cropped_volume = None
+    try:
+        original_volume = extract_original_volume(file_path)
+        if original_volume is None:
+            return None # Error logged previously
+
+        z_start, z_end = global_z_range
+        original_depth = original_volume.shape[0]
+
+        # Clamp range to ensure it's valid for *this* volume's original depth
+        clamped_z_start = max(0, z_start)
+        clamped_z_end = min(original_depth - 1, z_end)
+
+        # Check if clamped range is valid
+        if clamped_z_start > clamped_z_end or clamped_z_start >= original_depth or clamped_z_end < 0:
+            log.warning(f"Pass 1 - Global Z range [{z_start}-{z_end}] (clamped to [{clamped_z_start}-{clamped_z_end}]) "
+                        f"is invalid or yields empty slice for original depth {original_depth} of "
+                        f"T:{task.time_id} C:{ch_entry['channel']}. Skipping limit calc.")
+            return None
+
+        # Perform the global crop
+        globally_cropped_volume = original_volume[clamped_z_start : clamped_z_end + 1, :, :]
+        del original_volume # Free original memory now
+        original_volume = None
+
+        if globally_cropped_volume.size == 0:
+            # This check might be redundant given clamping logic, but safe
+            log.warning(f"Pass 1 - Volume empty after GLOBAL crop for T:{task.time_id} C:{ch_entry['channel']}. Skipping limit calc.")
+            return None
+
+        # Calculate limits using the GLOBALLY CROPPED volume
+        limits = calculate_limits_only(globally_cropped_volume, task.config.stretch_mode)
+        log.debug(f"Pass 1 - Calculated limits {limits} for T:{task.time_id} C:{ch_entry['channel']}")
+
+        # Return the result INCLUDING the cropped volume and the global range used
         return LimitsPassResult(
             time_id=task.time_id,
-            channel=task.channel_entry["channel"],
+            channel=ch_entry["channel"],
             limits=limits,
-            cropped_volume=cropped_volume,
-            z_range=z_range
+            globally_cropped_volume=globally_cropped_volume, # Keep the volume
+            global_z_range=global_z_range # Pass range along
         )
     except Exception as e:
-        log.error(f"❌ Unexpected error in limit calculation task T:{task.time_id} C:{task.channel_entry['channel']}: {e}", exc_info=task.config.debug)
+        log.error(f"❌ Pass 1 - Unexpected error T:{task.time_id} C:{ch_entry['channel']}: {e}", exc_info=task.config.debug)
         return None
+    finally:
+        # Ensure cleanup if error occurred before del
+        if original_volume is not None:
+            del original_volume
+        # globally_cropped_volume is either returned or should be None if error occurred before assignment
 
-# --- Helper Function _task_process_channel (Unchanged from previous version) ---
-def _task_process_channel(
-    pass1_result: LimitsPassResult,
-    layout: VolumeLayout,
-    config: PreprocessingConfig,
-    global_limits_per_channel: Optional[Dict[int, Tuple[float, float]]] = None
-) -> Optional[ProcessingResult]:
-    """Wrapper to call process_channel using data from Pass 1 and global limits."""
-    if pass1_result.cropped_volume is None or pass1_result.z_range is None:
-         log.warning(f"Missing cropped volume or z_range for T:{pass1_result.time_id} C:{pass1_result.channel}. Skipping processing.")
-         return None
-
-    final_limits = pass1_result.limits
-    if global_limits_per_channel:
-        ch = pass1_result.channel
-        global_tuple = global_limits_per_channel.get(ch)
-        if global_tuple:
-            final_limits.p_low, final_limits.p_high = global_tuple
-            log.debug(f"Overriding limits for T:{pass1_result.time_id} C:{ch} with global: {global_tuple}")
-        else:
-            log.warning(f"Global limits requested but not found for C:{ch}. Using per-image limits.")
-
-    result_dict = process_channel(
-        time_id=pass1_result.time_id,
-        ch_id=pass1_result.channel,
-        cropped_vol=pass1_result.cropped_volume,
-        layout=layout,
-        limits=final_limits,
-        z_range=pass1_result.z_range,
-        stretch_mode=config.stretch_mode,
-        dry_run=config.dry_run,
-        debug=config.debug,
-        output_folder=str(config.output_folder),
-    )
-
-    if result_dict:
-         return ProcessingResult(
-             time_id=result_dict["time_id"],
-             channel=result_dict["channel"],
-             filename=result_dict["filename"],
-             p_low=result_dict["intensity_range"]["p_low"],
-             p_high=result_dict["intensity_range"]["p_high"],
-             z_crop_range=result_dict["z_crop_range"],
-         )
-    else:
-        return None
-
-
-# --- _scan_and_parse_files (Unchanged from previous version) ---
-def _scan_and_parse_files(input_dir: Path) -> TimepointsDict:
-    timepoints_data: TimepointsDict = defaultdict(list)
-    tiff_regex = re.compile(r".*_ch(\d+)_stack(\d{4}).*?\.tif(?:f)?$", re.IGNORECASE)
-    log.info(f"Scanning for TIFF files in: {input_dir}")
-    found_files = list(input_dir.glob("*.tif*"))
-    if not found_files:
-        log.warning("No TIFF files found in the input directory.")
-        return timepoints_data
-    log.info(f"Found {len(found_files)} potential TIFF files. Parsing filenames...")
-    parsed_count = 0
-    skip_count = 0
-    for path in found_files:
-        match = tiff_regex.match(path.name)
-        if match:
-            try:
-                ch_id = int(match.group(1))
-                time_id = f"stack{match.group(2)}"
-                timepoints_data[time_id].append({"channel": ch_id, "path": path})
-                parsed_count += 1
-            except (ValueError, IndexError) as e:
-                log.warning(f"Skipping {path.name} — Error parsing captured groups: {e}")
-                skip_count += 1
-            except Exception as e:
-                log.warning(f"Skipping {path.name} — Unexpected error during parsing: {e}")
-                skip_count += 1
-    log.info(f"Parsed {parsed_count} files successfully.")
-    if skip_count > 0:
-        log.warning(f"Skipped {skip_count} files due to naming/parsing issues.")
-    for time_id in timepoints_data:
-        timepoints_data[time_id].sort(key=lambda x: x["channel"])
-    return timepoints_data
-
-# --- _setup_configuration (Unchanged from previous version) ---
-def _setup_configuration(args: Dict[str, Any]) -> PreprocessingConfig:
-    try:
-        config = PreprocessingConfig(
-            input_folder=Path(args["--input"]).resolve(),
-            output_folder=Path(args["--output"]).resolve(),
-            stretch_mode=args["--stretch"],
-            z_crop_threshold=int(args["--z-crop-threshold"]),
-            use_global_contrast=args["--global-contrast"],
-            dry_run=args["--dry-run"],
-            debug=args["--debug"],
-            max_threads=int(args["--threads"]),
-        )
-        log.info("Configuration loaded.")
-        if config.dry_run:
-            log.info("💡 Dry-run mode enabled.")
-        config.output_folder.mkdir(parents=True, exist_ok=True)
-        return config
-    except KeyError as e:
-        log.error(f"Missing expected argument: {e}")
-        raise ValueError(f"Configuration error: Missing argument {e}") from e
-    except ValueError as e:
-        log.error(f"Invalid argument value: {e}")
-        raise ValueError(f"Configuration error: Invalid value {e}") from e
-    except OSError as e:
-        log.error(f"❌ Could not create output directory {args['--output']}: {e}")
-        raise
-
-
-# --- _calculate_global_limits (Unchanged from previous version) ---
-def _calculate_global_limits(tasks: List[ProcessingTask], config: PreprocessingConfig) -> Tuple[Dict[int, Tuple[float, float]], List[LimitsPassResult]]:
-    """Pass 1: Extracts/crops, calculates limits, aggregates for global, returns results for Pass 2."""
-    log.info(" Kicking off Pass 1: Extracting volumes and calculating global contrast limits...")
-    global_range_agg: DefaultDict[int, Dict[str, float]] = defaultdict(
-        lambda: {"p_low": float("inf"), "p_high": float("-inf")}
-    )
+def _calculate_global_limits(
+    tasks: List[ProcessingTask], config: PreprocessingConfig, global_z_range: Tuple[int, int]
+) -> Tuple[Dict[int, Tuple[float, float]], List[LimitsPassResult]]:
+    """
+    Pass 1 Orchestrator: Calculates limits for each task (using global crop)
+    and aggregates them if global contrast is needed later. Returns results
+    including the globally cropped volumes.
+    """
+    log.info(" Kicking off Pass 1: Applying global crop & calculating contrast limits...")
+    global_range_agg: DefaultDict[int, Dict[str, float]] = defaultdict(lambda: {"p_low": float("inf"), "p_high": float("-inf")})
     num_tasks = len(tasks)
-    pass1_results: List[LimitsPassResult] = []
+    pass1_individual_results: List[LimitsPassResult] = []
     error_tasks = 0
 
-    with ThreadPoolExecutor(max_workers=config.max_threads) as executor:
-        futures = {executor.submit(_task_calculate_limits, task): task for task in tasks}
-
-        with tqdm(total=num_tasks, desc=" 🔭 Pass 1/2: Calc Limits") as pbar:
+    with ThreadPoolExecutor(max_workers=config.max_threads, thread_name_prefix="Pass1_Limits") as executor:
+        # Pass global_z_range to the task function
+        futures = {executor.submit(_task_calculate_limits, task, global_z_range): task for task in tasks}
+        with tqdm(total=num_tasks, desc=" 🔭 Pass 1/3: Calc Limits") as pbar:
             for future in as_completed(futures):
                 task = futures[future]
                 try:
                     result: Optional[LimitsPassResult] = future.result()
                     if result:
-                        pass1_results.append(result)
+                        pass1_individual_results.append(result) # Keep the full result
                         ch_id = result.channel
-                        p_low = result.limits.p_low
-                        p_high = result.limits.p_high
-                        global_range_agg[ch_id]["p_low"] = min(global_range_agg[ch_id]["p_low"], p_low)
-                        global_range_agg[ch_id]["p_high"] = max(global_range_agg[ch_id]["p_high"], p_high)
+                        # Aggregate limits based on this file's cropped data
+                        global_range_agg[ch_id]["p_low"] = min(global_range_agg[ch_id]["p_low"], result.limits.p_low)
+                        global_range_agg[ch_id]["p_high"] = max(global_range_agg[ch_id]["p_high"], result.limits.p_high)
                     else:
                         error_tasks += 1
                 except Exception as exc:
-                    log.error(f"❌ Error in Pass 1 future result for T:{task.time_id} C:{task.channel_entry['channel']}: {exc}", exc_info=config.debug)
+                    log.error(f"❌ Pass 1 - Error processing future T:{task.time_id} C:{task.channel_entry['channel']}: {exc}", exc_info=config.debug)
                     error_tasks += 1
                 finally:
                     pbar.update(1)
 
-    global_ranges: Dict[int, Tuple[float, float]] = {}
+    # Finalize aggregated global ranges
+    global_ranges_final: Dict[int, Tuple[float, float]] = {}
     for ch_id, limits_agg in global_range_agg.items():
         final_low = limits_agg["p_low"] if limits_agg["p_low"] != float("inf") else 0.0
         final_high = limits_agg["p_high"] if limits_agg["p_high"] != float("-inf") else 0.0
-        # --- FIX E701: Split lines ---
         if final_high <= final_low:
-             log.warning(f"Global range for C:{ch_id} collapsed or invalid [{final_low}, {final_high}]. Check input data or stretch mode '{config.stretch_mode}'. Using [0, max] or [0, 0].")
-             final_high = max(final_low, final_high)
-             if final_high == 0:
-                 final_low = 0
-        # --- End FIX ---
-        global_ranges[ch_id] = (final_low, final_high)
-        log.info(f"Global Range C:{ch_id}: ({global_ranges[ch_id][0]:.2f}, {global_ranges[ch_id][1]:.2f})")
+             log.warning(f"Aggregated global range C:{ch_id} collapsed [{final_low:.2f}, {final_high:.2f}]. Adjusting.")
+             # Basic fix: ensure high > low.
+             final_high = max(final_high, final_low + 1e-6) # Add epsilon
+             if final_low == 0 and final_high == 1e-6:
+                 log.warning(f"Adjusted C:{ch_id} range is tiny [{final_low:.2f}, {final_high:.2g}]")
+        global_ranges_final[ch_id] = (final_low, final_high)
+        log.info(f"Aggregated Global Range C:{ch_id}: ({global_ranges_final[ch_id][0]:.4f}, {global_ranges_final[ch_id][1]:.4f})")
 
     if error_tasks > 0:
-         log.warning(f"Pass 1 completed with {error_tasks} errors during extraction/limit calculation.")
+        log.warning(f"Pass 1 completed with {error_tasks} errors during limit calculation.")
+    if not pass1_individual_results:
+        # If no tasks succeeded in Pass 1, we cannot proceed
+        raise ValueError("Pass 1 failed: No contrast limits could be calculated for any task.")
 
-    log.info("✅ Pass 1 finished. Global limits determined (if applicable).")
-    return global_ranges, pass1_results
+    log.info(f"✅ Pass 1 finished. Calculated limits for {len(pass1_individual_results)} tasks.")
+    # Return aggregated ranges AND the list of individual results (containing volumes)
+    return global_ranges_final, pass1_individual_results
 
 
-# --- _execute_processing_pass (Unchanged from previous version) ---
-def _execute_processing_pass(
-    pass1_results: List[LimitsPassResult],
+# === Pass 2: Process Channels (Tile & Save) ===
+def _task_process_channel(
+    pass1_result: LimitsPassResult, # Receive the full result from Pass 1
+    layout: VolumeLayout, # Layout based on GLOBAL cropped depth
     config: PreprocessingConfig,
-    layout: VolumeLayout,
-    global_ranges: Optional[Dict[int, Tuple[float, float]]] = None
+    global_contrast_override: Optional[Tuple[float, float]] = None
+) -> Optional[ProcessingResult]:
+    """
+    Pass 2 Task: Uses globally cropped volume from Pass 1 result, applies
+    contrast (either per-image from Pass 1 or global override), tiles, saves.
+    """
+    log.debug(f"Pass 2 task started for T:{pass1_result.time_id} C:{pass1_result.channel}")
+    globally_cropped_volume = None # Define for finally block
+    try:
+        # 1. Get the already globally cropped volume from Pass 1 result
+        globally_cropped_volume = pass1_result.globally_cropped_volume
+        if globally_cropped_volume is None:
+             log.warning(f"Pass 2 - Missing cropped volume T:{pass1_result.time_id} C:{pass1_result.channel}. Skipping.")
+             return None
+
+        # 2. Determine final contrast limits to use for processing
+        final_limits_to_use = pass1_result.limits # Default to per-image limits calculated in Pass 1
+        if global_contrast_override:
+            log.debug(f"Pass 2 - Overriding T:{pass1_result.time_id} C:{pass1_result.channel} with global: {global_contrast_override}")
+            # Use the global override values, but keep other debug info if needed
+            final_limits_to_use = ContrastLimits(
+                p_low=global_contrast_override[0],
+                p_high=global_contrast_override[1],
+                # Copy other potentially useful fields from original limits if needed by debug funcs
+                p1=pass1_result.limits.p1,
+                p035=pass1_result.limits.p035,
+                p9965=pass1_result.limits.p9965,
+                smart_early=pass1_result.limits.smart_early,
+                smart_late=pass1_result.limits.smart_late,
+                actual_min=pass1_result.limits.actual_min,
+                actual_max=pass1_result.limits.actual_max
+            )
+
+        # 3. Call the io_utils processing function
+        #    Pass the globally cropped volume and the corresponding layout
+        result_dict = process_channel(
+            time_id=pass1_result.time_id,
+            ch_id=pass1_result.channel,
+            globally_cropped_vol=globally_cropped_volume, # Pass the volume
+            layout=layout, # Layout is based on global cropped depth
+            limits=final_limits_to_use, # Pass the final limits to apply
+            stretch_mode=config.stretch_mode, # Pass original mode for debug hist title
+            dry_run=config.dry_run,
+            debug=config.debug,
+            output_folder=str(config.output_folder),
+        )
+        # Note: globally_cropped_volume memory is handled by caller (_execute_processing_pass)
+
+        # 4. Construct result object if successful
+        if result_dict:
+            log.debug(f"Pass 2 - Success T:{pass1_result.time_id} C:{pass1_result.channel}")
+            # ProcessingResult no longer includes z_crop_range
+            return ProcessingResult(
+                time_id=result_dict["time_id"],
+                channel=result_dict["channel"],
+                filename=result_dict["filename"],
+                p_low=result_dict["intensity_range"]["p_low"], # Limits used
+                p_high=result_dict["intensity_range"]["p_high"],
+            )
+        else:
+            log.warning(f"Pass 2 - Processing function failed T:{pass1_result.time_id} C:{pass1_result.channel}.")
+            return None
+
+    except Exception as e:
+        log.error(f"❌ Pass 2 - Unexpected error T:{pass1_result.time_id} C:{pass1_result.channel}: {e}", exc_info=config.debug)
+        return None
+    # finally: # Cleanup handled by caller
+
+def _execute_processing_pass(
+    pass1_results: List[LimitsPassResult], # Use results from Pass 1 directly
+    config: PreprocessingConfig,
+    layout: VolumeLayout, # Layout based on GLOBAL cropped depth
+    global_contrast_ranges: Optional[Dict[int, Tuple[float, float]]] = None # Aggregated global limits
 ) -> List[ProcessingResult]:
-    """Pass 2: Executes the main processing using data from pass 1 and global limits if provided."""
-    pass_num = "2/2" if global_ranges else "1/1"
-    log.info(f" Kicking off Pass {pass_num}: Processing channels...")
+    """Pass 2 Orchestrator: Executes main processing using data from Pass 1."""
+    pass_desc = "Pass 2/3" # Adjusted pass numbering
+    log.info(f" Kicking off {pass_desc}: Processing channels...")
     results: List[ProcessingResult] = []
     processed_count = 0
     error_count = 0
-    num_tasks = len(pass1_results)
+    tasks_submitted = len(pass1_results) # Number of tasks is based on successful Pass 1 results
 
-    with ThreadPoolExecutor(max_workers=config.max_threads) as executor:
-        futures = {
-            executor.submit(_task_process_channel, p1_res, layout, config, global_ranges): p1_res
-            for p1_res in pass1_results
-        }
+    with ThreadPoolExecutor(max_workers=config.max_threads, thread_name_prefix="Pass2_Process") as executor:
+        futures = {}
+        for p1_res in pass1_results:
+            # Determine if global override is needed for this specific task
+            global_override = None
+            if config.use_global_contrast and global_contrast_ranges:
+                global_override = global_contrast_ranges.get(p1_res.channel)
+                if not global_override:
+                    log.warning(f"{pass_desc} - Global contrast requested but not found C:{p1_res.channel} T:{p1_res.time_id}. Using per-image.")
 
-        with tqdm(total=num_tasks, desc=f" ⚙️ Pass {pass_num}: Processing") as pbar:
+            # Submit task, passing the Pass 1 result object directly
+            fut = executor.submit(
+                _task_process_channel,
+                p1_res, # Pass the whole result from Pass 1
+                layout,
+                config,
+                global_override # Pass optional override tuple
+            )
+            futures[fut] = p1_res # Map future back for cleanup/logging
+
+        log.info(f"{pass_desc} - Submitted {tasks_submitted} tasks.")
+        with tqdm(total=tasks_submitted, desc=f" ⚙️ {pass_desc}: Processing") as pbar:
             for fut in as_completed(futures):
-                p1_res = futures[fut]
+                p1_res = futures[fut] # Get corresponding Pass 1 result
                 try:
                     result_obj: Optional[ProcessingResult] = fut.result()
                     if result_obj:
                         processed_count += 1
                         results.append(result_obj)
                     else:
-                        log.warning(f"Task for T:{p1_res.time_id} C:{p1_res.channel} returned no result in Pass {pass_num}.")
+                        # Task function logs specific reasons for None
+                        log.warning(f"{pass_desc} - Task T:{p1_res.time_id} C:{p1_res.channel} returned no result.")
                         error_count += 1
                 except Exception as exc:
-                    log.error(
-                        f"❌ Error processing result for T:{p1_res.time_id} C:{p1_res.channel} in Pass {pass_num}: {exc}",
-                        exc_info=config.debug
-                    )
+                    log.error(f"❌ {pass_desc} - Error T:{p1_res.time_id} C:{p1_res.channel}: {exc}", exc_info=config.debug)
                     error_count += 1
                 finally:
                     pbar.update(1)
-                    if p1_res.cropped_volume is not None:
-                         del p1_res.cropped_volume
-                         p1_res.cropped_volume = None
+                    # --- Memory Cleanup: Delete volume data after task finishes ---
+                    # Check existence before deleting, as it might be None if Pass 1 failed early
+                    if hasattr(p1_res, 'globally_cropped_volume') and p1_res.globally_cropped_volume is not None:
+                         del p1_res.globally_cropped_volume
+                         p1_res.globally_cropped_volume = None
+                    # --- End Memory Cleanup ---
 
-    log.info(f"📊 Pass {pass_num} complete. Successful: {processed_count}, Errors/Skipped: {error_count}")
+    log.info(f"📊 {pass_desc} complete. Successful: {processed_count}, Errors/Skipped: {error_count}")
     return results
 
 
-# --- Modified Metadata Finalization ---
+# === Metadata Finalization & Manifest Writing ===
 def _finalize_metadata(
     results: List[ProcessingResult],
-    layout: VolumeLayout,
-    global_ranges_used: Optional[Dict[int, Tuple[float, float]]]
+    layout: VolumeLayout, # Layout based on GLOBAL cropped depth
+    global_z_range: Tuple[int, int], # The global range used
+    global_contrast_ranges_used: Optional[Dict[int, Tuple[float, float]]] # Actual global contrast if used
 ) -> Dict[str, Any]:
-    """Aggregates results into the final metadata structure, including z_crop_range."""
+    """Aggregates results into the final metadata structure including global Z range."""
+    # (Implementation is okay from previous version, style fixes applied)
     log.info("📝 Finalizing metadata...")
     metadata: Dict[str, Any] = {
         "tile_layout": {"cols": layout.cols, "rows": layout.rows},
         "volume_size": {"width": layout.width, "height": layout.height, "depth": layout.depth},
         "channels": 0,
+        "global_z_crop_range": list(global_z_range),
         "timepoints": [],
         "global_intensity": {},
     }
-    timepoints_results: DefaultDict[str, TimepointResult] = defaultdict(
-        lambda: {"time": None, "files": {}}
-    )
-
+    timepoints_results: DefaultDict[str, TimepointResult] = defaultdict(lambda: {"time": None, "files": {}})
     max_channel = -1
+    if not results:
+        log.warning("No results to finalize.")
+        return metadata
+
     for res in results:
         res_time = res.time_id
         res_ch = res.channel
         max_channel = max(max_channel, res_ch)
-
         timepoints_results[res_time]["time"] = res_time
+        # No per-file z_crop_range here
         timepoints_results[res_time]["files"][f"c{res_ch}"] = {
-            "file": res.filename,
-            "p_low": res.p_low,
-            "p_high": res.p_high,
-            "z_crop_range": res.z_crop_range,
+            "file": res.filename, "p_low": res.p_low, "p_high": res.p_high,
         }
-
     metadata["channels"] = max_channel + 1
     processed_time_ids = sorted(timepoints_results.keys())
     metadata["timepoints"] = [
@@ -448,93 +564,168 @@ def _finalize_metadata(
     ]
 
     final_global_intensity = {}
-    if global_ranges_used:
-        for ch_id, (low, high) in global_ranges_used.items():
+    if global_contrast_ranges_used:
+        log.info("Populating global_intensity from pre-calculated ranges.")
+        for ch_id, (low, high) in global_contrast_ranges_used.items():
              final_global_intensity[f"c{ch_id}"] = {"p_low": low, "p_high": high}
     else:
-        # --- FIX F841: Remove unused global_range_agg ---
-        # global_range_agg: DefaultDict[int, Dict[str, float]] = defaultdict(
-        #     lambda: {"p_low": float("inf"), "p_high": float("-inf")}
-        # )
-        # --- End FIX ---
-        if results:
-            all_channels = set(res.channel for res in results)
-            for ch in all_channels:
-                 channel_results = [res for res in results if res.channel == ch]
-                 if channel_results:
-                     # Calculate directly from results for this channel
-                     low = min(res.p_low for res in channel_results)
-                     high = max(res.p_high for res in channel_results)
-                     final_global_intensity[f"c{ch}"] = {"p_low": low, "p_high": high}
-                 else:
-                      final_global_intensity[f"c{ch}"] = {"p_low": 0.0, "p_high": 0.0}
-        else:
-             log.warning("No successful results to calculate retrospective global intensity.")
-
+        log.info("Calculating retrospective global_intensity.")
+        all_channels = set(res.channel for res in results)
+        for ch in all_channels:
+             channel_results = [res for res in results if res.channel == ch]
+             if channel_results:
+                 low = min(res.p_low for res in channel_results)
+                 high = max(res.p_high for res in channel_results)
+                 final_global_intensity[f"c{ch}"] = {"p_low": low, "p_high": high}
+             else:
+                  final_global_intensity[f"c{ch}"] = {"p_low": 0.0, "p_high": 0.0}
     metadata["global_intensity"] = final_global_intensity
     log.info("Metadata finalized.")
     return metadata
 
-# --- _write_manifest (Unchanged from previous version) ---
 def _write_manifest(metadata: Dict[str, Any], config: PreprocessingConfig):
+    """Writes the finalized metadata to manifest.json."""
+    # (Implementation is okay from previous version, style fixes applied)
     if config.dry_run:
-        log.info("🧪 Dry run complete — manifest not written.")
+        log.info("--dry-run enabled, manifest not written.")
         return
     if not metadata.get("timepoints"):
-        log.warning("⚠️ No timepoints were successfully processed — manifest not written.")
+        log.warning("No timepoints in metadata, manifest not written.")
         return
+
     manifest_path = config.output_folder / "manifest.json"
-    log.info(f"📄 Writing metadata to {manifest_path}...")
+    log.info(f"Writing metadata to {manifest_path}...")
     try:
         with open(manifest_path, "w") as f:
             json.dump(metadata, f, indent=2)
         log.info("Manifest saved successfully.")
-    except IOError as e:
-        log.error(f"❌ Failed to write manifest file {manifest_path}: {e}")
-    except TypeError as e:
-        log.error(f"❌ Failed to serialize metadata to JSON: {e}")
+    except Exception as e:
+        log.error(f"❌ Failed to write manifest: {e}", exc_info=config.debug)
 
 
-# --- Main Orchestration Function (Unchanged from previous version) ---
-def run_preprocessing(args: Dict[str, Any]):
-    """Runs the TIFF to WebP preprocessing pipeline with optional Z-cropping."""
-    start_time = time.time()
-    log.info("🚀 Starting TIFF to WebP preprocessing...")
-
+# === File Scanning and Config Setup ===
+def _scan_and_parse_files(input_dir: Path) -> TimepointsDict:
+    """Scans input directory for TIFF files and parses timepoint/channel info."""
+    # (Implementation is okay from previous version, style fixes applied)
+    timepoints_data: DefaultDict[str, List[ChannelEntry]] = defaultdict(list)
+    tiff_regex = re.compile(r".*_ch(\d+)_stack(\d{4}).*?\.tiff?$", re.IGNORECASE)
+    log.info(f"Scanning for TIFF files in: {input_dir}")
+    found_files: List[Path] = []
     try:
+        found_files = list(input_dir.glob("*.tif*"))
+    except OSError as e:
+        log.error(f"Error scanning {input_dir}: {e}")
+        return timepoints_data
+    if not found_files:
+        log.warning(f"No TIFF files found in {input_dir}.")
+        return timepoints_data
+    log.info(f"Found {len(found_files)} files. Parsing...")
+    parsed_count = 0
+    skip_count = 0
+    for path in found_files:
+        if not path.is_file():
+            log.debug(f"Skipping non-file: {path.name}")
+            continue
+        match = tiff_regex.match(path.name)
+        if match:
+            try:
+                ch_id = int(match.group(1))
+                time_id_num = int(match.group(2))
+                time_id = f"stack{time_id_num:04d}"
+                timepoints_data[time_id].append({"channel": ch_id, "path": path.resolve()})
+                parsed_count += 1
+            except ValueError:
+                log.warning(f"Skipping {path.name}: Cannot parse numbers.")
+                skip_count += 1
+            except Exception as e:
+                log.warning(f"Skipping {path.name} due to error: {e}")
+                skip_count += 1
+        else:
+            log.debug(f"Skipping {path.name}: No pattern match.")
+            skip_count +=1
+    log.info(f"Parsed {parsed_count} files.")
+    if skip_count > 0:
+        log.warning(f"Skipped {skip_count} files.")
+    for time_id in timepoints_data:
+        timepoints_data[time_id].sort(key=lambda x: x["channel"])
+    return timepoints_data
+
+def _setup_configuration(args: Dict[str, Any]) -> PreprocessingConfig:
+    """Sets up PreprocessingConfig from command-line arguments."""
+    # (Implementation is okay from previous version, style fixes applied)
+    try:
+        input_folder = Path(args["--input"]).resolve()
+        output_folder = Path(args["--output"]).resolve()
+        if not input_folder.is_dir():
+            raise FileNotFoundError(f"Input dir not found: {input_folder}")
+        output_folder.mkdir(parents=True, exist_ok=True)
+        log.info(f"Using Output folder: {output_folder}")
+        config = PreprocessingConfig(
+            input_folder=input_folder, output_folder=output_folder,
+            stretch_mode=args["--stretch"], z_crop_threshold=int(args["--z-crop-threshold"]),
+            use_global_contrast=args["--global-contrast"], dry_run=args["--dry-run"],
+            debug=args["--debug"], max_threads=int(args["--threads"]),
+        )
+        log.info("Configuration loaded.")
+        log.debug(f"Config details: {config}")
+        return config
+    except KeyError as e:
+        log.error(f"Config error: Missing {e}")
+        raise ValueError(f"Missing: {e}")
+    except ValueError as e:
+        log.error(f"Config error: Invalid value ({e})")
+        raise ValueError(f"Invalid value: {e}")
+    except FileNotFoundError as e:
+        log.error(f"Config error: {e}")
+        raise
+    except Exception as e:
+        log.error(f"Unexpected config error: {e}", exc_info=True)
+        raise ValueError(f"Unexpected config error: {e}")
+
+# === Main Orchestration Function ===
+def run_preprocessing(args: Dict[str, Any]):
+    """Runs the main TIFF preprocessing pipeline with 3 passes."""
+    # (Implementation is okay from previous version, style fixes applied)
+    start_time = time.time()
+    log.info("🚀 Starting PixelPacker Preprocessing Pipeline...")
+    try:
+        # --- Setup ---
         config = _setup_configuration(args)
         timepoints_data = _scan_and_parse_files(config.input_folder)
-
-        layout, tasks = _prepare_tasks(config, timepoints_data)
-        if not layout or not tasks:
-            log.error("❌ Aborting run: Could not determine layout or no tasks found.")
+        if not timepoints_data:
+            log.error("❌ Aborting: No input files found.")
             return
 
-        global_ranges: Optional[Dict[int, Tuple[float, float]]] = None
-        pass1_results: List[LimitsPassResult] = []
+        # --- Pass 0 & Layout ---
+        global_z_range, layout, tasks = _prepare_tasks_and_layout(config, timepoints_data)
+        if not layout or not tasks or global_z_range is None:
+            log.error("❌ Aborting: Failed setup.")
+            return
 
-        if config.use_global_contrast:
-            try:
-                global_ranges, pass1_results = _calculate_global_limits(tasks, config)
-            except ValueError as e:
-                 log.error(f"❌ Aborting run: {e}")
-                 return
-            results = _execute_processing_pass(pass1_results, config, layout, global_ranges)
-        else:
-            log.info("Global contrast not selected. Running single processing pass...")
-            _, pass1_results = _calculate_global_limits(tasks, config)
-            results = _execute_processing_pass(pass1_results, config, layout, None)
+        # --- Pass 1: Limits ---
+        global_contrast_ranges, pass1_results = _calculate_global_limits(tasks, config, global_z_range)
+        if not pass1_results:
+            log.error("❌ Aborting: Failed Pass 1 (Limit Calc).")
+            return
 
-        metadata = _finalize_metadata(results, layout, global_ranges)
+        # --- Pass 2: Processing ---
+        limits_for_processing = global_contrast_ranges if config.use_global_contrast else None
+        final_results = _execute_processing_pass(
+             pass1_results, config, layout, limits_for_processing
+        )
+
+        # --- Finalize ---
+        actual_global_ranges_used = global_contrast_ranges if config.use_global_contrast else None
+        metadata = _finalize_metadata(final_results, layout, global_z_range, actual_global_ranges_used)
         _write_manifest(metadata, config)
 
     except (ValueError, FileNotFoundError, OSError) as e:
-        log.error(f"❌ Preprocessing aborted due to critical error: {e}")
+        log.error(f"❌ Preprocessing aborted: {e}")
         return
     except Exception as e:
-        log.critical(f"❌ An unexpected critical error occurred during orchestration: {e}", exc_info=True)
+        log.critical(f"❌ Unexpected critical error: {e}", exc_info=True)
         return
-
-    elapsed_time = time.time() - start_time
-    log.info(f"🏁 Finished in {elapsed_time:.2f}s")
+    finally:
+        elapsed_time = time.time() - start_time
+        log.info(f"🏁 Pipeline finished in {elapsed_time:.2f}s")
 
