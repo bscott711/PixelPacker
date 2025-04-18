@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 from typing_extensions import Annotated
+import enum
 
 import typer
 
@@ -13,9 +14,15 @@ from . import __version__
 log = logging.getLogger(__name__)
 app = typer.Typer(
     name="pixelpacker",
-    help="Processes multi-channel, multi-timepoint TIFF stacks into tiled WebP volumes with contrast stretching options.",
-    add_completion=False,
+    help="Processes multi-channel, multi-timepoint TIFF stacks into tiled WebP volumes with contrast stretching and automatic Z-cropping.",
+    add_completion=False
 )
+
+# --- Define Enum for choices ---
+class ZCropMethod(str, enum.Enum):
+    slope = "slope"
+    threshold = "threshold"
+# --- End Enum ---
 
 def version_callback(value: bool):
     """Prints the version and exits."""
@@ -41,13 +48,21 @@ def main(
         "--stretch", "-s", help="Contrast stretch method."
     )] = "smart-late",
 
-    # --- ADD Z-CROP OPTION ---
+    # --- ADD Z-CROP METHOD OPTION ---
+    z_crop_method: Annotated[ZCropMethod, typer.Option(
+        "--z-crop-method",
+        case_sensitive=False, # Allow 'slope' or 'SLOPE' etc.
+        help="Method for automatic Z-cropping."
+    )] = ZCropMethod.slope, # Default to slope analysis
+    # --- END ADDED OPTION ---
+
+    # --- RE-INTRODUCE Z-CROP THRESHOLD OPTION ---
     z_crop_threshold: Annotated[int, typer.Option(
         "--z-crop-threshold",
-        min=0, # Threshold cannot be negative
-        help="Crop Z-slices where max intensity is <= this threshold. Default 0 crops only fully black slices."
-    )] = 0, # Default to 0
-    # --- END ADDED OPTION ---
+        min=0,
+        help="Intensity threshold used ONLY if --z-crop-method=threshold."
+    )] = 0, # Default threshold value
+    # --- END RE-INTRODUCED OPTION ---
 
     global_contrast: Annotated[bool, typer.Option(
         "--global-contrast / --no-global-contrast", "-g / ",
@@ -80,13 +95,25 @@ def main(
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+    log.debug("Starting PixelPacker with arguments:")
+    log.debug(f"  Input Folder: {input_folder}")
+    log.debug(f"  Output Folder: {output_folder}")
+    log.debug(f"  Stretch Mode: {stretch_mode}")
+    log.debug(f"  Z-Crop Method: {z_crop_method.value}") # Log the selected method
+    if z_crop_method == ZCropMethod.threshold:
+        log.debug(f"  Z-Crop Threshold: {z_crop_threshold}") # Log threshold only if relevant
+    log.debug(f"  Global Contrast: {global_contrast}")
+    log.debug(f"  Threads: {threads}")
+    log.debug(f"  Dry Run: {dry_run}")
+    log.debug(f"  Debug: {debug}")
 
     # Prepare arguments dictionary for core function
     args_dict = {
         "--input": str(input_folder),
         "--output": str(output_folder),
         "--stretch": stretch_mode,
-        "--z-crop-threshold": z_crop_threshold, # Pass the new arg
+        "--z-crop-method": z_crop_method.value, # Pass method string
+        "--z-crop-threshold": z_crop_threshold, # Pass threshold value
         "--global-contrast": global_contrast,
         "--threads": str(threads),
         "--dry-run": dry_run,
