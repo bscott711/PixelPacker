@@ -24,6 +24,9 @@ dependencies = [
     "tqdm>=4.67.1",
 ]
 
+[project.scripts]
+pixelpacker = "pixelpacker.cli:main"
+
 [project.urls]
 "Homepage" = "https://github.com/bscott711/PixelPacker"
 "Source"   = "https://github.com/bscott711/PixelPacker"

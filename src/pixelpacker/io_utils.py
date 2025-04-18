@@ -127,7 +127,6 @@ def save_histogram_debug(img: np.ndarray, limits: ContrastLimits, out_path: Path
         ax.legend(fontsize="small")
         ax.grid(True, axis="y", linestyle=":", alpha=0.5)
         ax.set_xlim(vmin, vmax)
-        fig.tight_layout()
         log.debug(f"Saving histogram debug plot to: {out_path}")
         fig.savefig(str(out_path), dpi=100)
     except Exception as e:

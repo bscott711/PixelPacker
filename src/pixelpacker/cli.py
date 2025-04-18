@@ -19,7 +19,7 @@ Options:
   --output=<folder>       Output folder for WebP volumes and manifest.json.
                           [default: ./volumes]
   --stretch=<mode>        Contrast stretch method: smart | smart-late | imagej-auto | max
-                          [default: smart]
+                          [default: smart-late]
   --global-contrast       Apply contrast range calculated globally across all timepoints
                           for each channel, instead of per-timepoint.
   --threads=<n>           Number of worker threads for parallel processing.
