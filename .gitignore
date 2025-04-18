@@ -9,6 +9,9 @@ __pycache__/
 # System files
 .DS_Store
 volumes/
+ 
+# Test Reports
+*_report.html
 
 # Distribution / packaging
 .Python
