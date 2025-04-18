@@ -9,6 +9,7 @@ __pycache__/
 # System files
 .DS_Store
 volumes*/
+cropped*/
  
 # Test Reports
 *_report.html
