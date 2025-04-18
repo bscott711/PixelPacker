@@ -1,0 +1,10 @@
+-rw-r--r--@  1 minesbioimaging  staff    75M Oct  1  2024 cell2_CamB_ch0_stack0000_488nm_0000000msec_0014157451msecAbs_decon.tif
+-rw-r--r--@  1 minesbioimaging  staff    76M Oct  1  2024 cell2_CamB_ch0_stack0001_488nm_0012660msec_0014170111msecAbs_decon.tif
+-rw-r--r--@  1 minesbioimaging  staff    76M Oct  1  2024 cell2_CamB_ch0_stack0002_488nm_0025320msec_0014182771msecAbs_decon.tif
+-rw-r--r--@  1 minesbioimaging  staff    76M Oct  1  2024 cell2_CamB_ch0_stack0003_488nm_0037980msec_0014195431msecAbs_decon.tif
+-rw-r--r--@  1 minesbioimaging  staff    76M Oct  1  2024 cell2_CamB_ch0_stack0004_488nm_0050640msec_0014208091msecAbs_decon.tif
+-rw-r--r--@  1 minesbioimaging  staff    76M Oct  1  2024 cell2_CamB_ch0_stack0005_488nm_0063300msec_0014220751msecAbs_decon.tif
+-rw-r--r--@  1 minesbioimaging  staff    77M Oct  1  2024 cell2_CamB_ch0_stack0006_488nm_0075959msec_0014233410msecAbs_decon.tif
+-rw-r--r--@  1 minesbioimaging  staff    77M Oct  1  2024 cell2_CamB_ch0_stack0007_488nm_0088619msec_0014246070msecAbs_decon.tif
+-rw-r--r--@  1 minesbioimaging  staff    77M Oct  1  2024 cell2_CamB_ch0_stack0008_488nm_0101279msec_0014258730msecAbs_decon.tif
+-rw-r--r--@  1 minesbioimaging  staff    77M Oct  1  2024 cell2_CamB_ch0_stack0009_488nm_0113939msec_0014271390msecAbs_decon.tif

@@ -1,0 +1,10 @@
+-rw-r--r--@ 1 minesbioimaging  staff   728K Apr 17 23:09 volume_stack0000_c0.webp
+-rw-r--r--@ 1 minesbioimaging  staff   737K Apr 17 23:09 volume_stack0001_c0.webp
+-rw-r--r--@ 1 minesbioimaging  staff   739K Apr 17 23:09 volume_stack0002_c0.webp
+-rw-r--r--@ 1 minesbioimaging  staff   738K Apr 17 23:09 volume_stack0003_c0.webp
+-rw-r--r--@ 1 minesbioimaging  staff   750K Apr 17 23:09 volume_stack0004_c0.webp
+-rw-r--r--@ 1 minesbioimaging  staff   775K Apr 17 23:09 volume_stack0005_c0.webp
+-rw-r--r--@ 1 minesbioimaging  staff   786K Apr 17 23:09 volume_stack0006_c0.webp
+-rw-r--r--@ 1 minesbioimaging  staff   763K Apr 17 23:09 volume_stack0007_c0.webp
+-rw-r--r--@ 1 minesbioimaging  staff   768K Apr 17 23:09 volume_stack0008_c0.webp
+-rw-r--r--@ 1 minesbioimaging  staff   786K Apr 17 23:09 volume_stack0009_c0.webp
