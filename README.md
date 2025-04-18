@@ -3,7 +3,7 @@
 
 **Automate your 3D TIFF→WebP pipeline** for fast, web‑friendly volumetric viewing. 
 
-**Achieve ~100X file‑size reduction (e.g. 75 MB → 750 KB).**
+**Achieve ~100X file‑size reduction (e.g. 75 MB → 600 KB).**
 
 ---
 
@@ -140,7 +140,7 @@ python -m pixelpacker.cli   --input  <input_tiff_folder>   --output <output_volu
 
 ## 🔗 Dependencies
 
-- Python ≥ 3.12  
+- Python ≥ 3.10  
 - numpy  
 - tifffile  
 - Pillow  
@@ -159,6 +159,6 @@ MIT — see [LICENSE](LICENSE)
 
 ---
 
-## 🐞 Issues
+## 🐛 Issues
 
 Please report bugs & feature requests on [GitHub Issues](https://github.com/bscott711/PixelPacker/issues).

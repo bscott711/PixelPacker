@@ -1,29 +1,34 @@
 [project]
 name = "pixelpacker"
-version = "0.1.0"
+version = "0.2.0"
 description = "Automates TIFF stack processing: autoscale, convert to 8‑bit, tile 3D volumes into 2D atlases, and compress to WebP for web‑based volumetric viewing."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
   { name = "Brandon Scott", email = "brandon.scott@sdsmt.edu" },
 ]
 keywords = ["tiff", "webp", "volumetric", "atlas", "imaging", "pipeline"]
 classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
     # REMOVE: "docopt>=0.6.2",
     "typer>=0.9.0", # Add Typer
-    "matplotlib>=3.7,<4.0", # Keep relaxed dependencies
+    "matplotlib>=3.7,<4.0",
     "numpy>=1.21,<3.0",
     "pillow>=10.0,<12.0",
     "scipy>=1.7,<2.0",
     "tifffile>=2023.1.1",
     "tqdm>=4.64",
-    # Add typing_extensions if you used it in cli.py for compatibility
     "typing_extensions>=4.0.0",
 ]
 
