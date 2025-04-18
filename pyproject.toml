@@ -58,3 +58,9 @@ pixelpacker = "pixelpacker.cli:app" # Change from cli:main to cli:app
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "build>=1.2.2.post1",
+    "twine>=6.1.0",
+]
