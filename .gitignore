@@ -8,7 +8,7 @@ __pycache__/
 
 # System files
 .DS_Store
-volumes/
+volumes*/
  
 # Test Reports
 *_report.html
