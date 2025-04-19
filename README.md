@@ -1,11 +1,13 @@
-# PixelPacker  
+![Banner](Banner.png)
+---
+
 [![Python Version](https://img.shields.io/pypi/pyversions/pixelpacker)](https://pypi.org/project/pixelpacker/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Automate your 3D TIFF→WebP pipeline** for fast, web‑friendly volumetric viewing. 
 
-**Achieve ~100X file‑size reduction (e.g. 75 MB → 600 KB).**
+**Achieve >100X file‑size reduction (e.g. 75 MB → 600 KB).**
 
----
+
 
 ## 🚀 Quick Start
 
@@ -24,7 +26,7 @@
    uv pip install -e .
    ```
 
----
+
 
 ## 🎨 Features
 
@@ -55,30 +57,30 @@
 - **Easy CLI**  
   Clear flags and built‑in `--help`.
 
----
+
 
 ## 💻 Usage
 
 ```bash
-python -m pixelpacker.cli   --input  <input_tiff_folder>   --output <output_volume_folder>   [OPTIONS]
+pixelpacker  --input  <input_tiff_folder>   --output <output_volume_folder>   [OPTIONS]
 ```
 
 ### Examples
 
 - **Default (smart contrast)**  
   ```bash
-  python -m pixelpacker.cli     --input ./Input_TIFFs     --output ./volumes
+  pixelpacker     --input ./Input_TIFFs     --output ./volumes
   ```
 - **ImageJ contrast + 8 threads + debug**  
   ```bash
-  python -m pixelpacker.cli     --input /path/to/tiffs     --output /path/to/web_volumes     --stretch imagej-auto     --threads 8     --debug
+  pixelpacker     --input /path/to/tiffs     --output /path/to/web_volumes     --stretch imagej-auto     --threads 8     --debug
   ```
 - **Global contrast across timepoints**  
   ```bash
-  python -m pixelpacker.cli     --input ./Input_TIFFs     --output ./volumes_global     --global-contrast
+  pixelpacker     --input ./Input_TIFFs     --output ./volumes_global     --global-contrast
   ```
 
----
+
 
 ## ⚙️ CLI Options
 
@@ -97,7 +99,6 @@ python -m pixelpacker.cli   --input  <input_tiff_folder>   --output <output_volu
 > **Tip:** If you see module name issues, run  
 > `python -m tiff_preprocessor.cli …`
 
----
 
 ## 📂 Input / Output Formats
 
@@ -136,7 +137,7 @@ python -m pixelpacker.cli   --input  <input_tiff_folder>   --output <output_volu
     }
   }
   ```
----
+
 
 ## 🔗 Dependencies
 
@@ -151,13 +152,12 @@ python -m pixelpacker.cli   --input  <input_tiff_folder>   --output <output_volu
 
 See [pyproject.toml](pyproject.toml) for versions.
 
----
+
 
 ## 📄 License
 
 MIT — see [LICENSE](LICENSE)
 
----
 
 ## 🐛 Issues
 
