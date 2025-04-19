@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 # Make sure TypedDict is imported if not already via other means
-from typing import TypedDict # Add List, Optional, Any if moving type aliases here
+from typing import TypedDict, Literal # Add List, Optional, Any if moving type aliases here
 
 # --- Data classes for configuration and layout ---
 
@@ -39,6 +39,7 @@ class PreprocessingConfig:
     dry_run: bool
     debug: bool
     max_threads: int
+    executor_type: Literal["thread", "process"] = "thread"
 
 @dataclass
 class ProcessingTask:

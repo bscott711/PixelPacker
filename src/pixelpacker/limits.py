@@ -1,7 +1,7 @@
 # src/pixelpacker/limits.py
 
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 from typing import DefaultDict, Dict, List, Optional, Tuple
 
@@ -12,7 +12,7 @@ from tqdm import tqdm
 from .data_models import PreprocessingConfig, ProcessingTask  # Import shared dataclasses
 from .io_utils import extract_original_volume
 from .stretch import ContrastLimits, calculate_limits_only
-from .utils import log  # Use centralized logger
+from .utils import log, get_executor
 
 
 @dataclass
@@ -189,9 +189,7 @@ def calculate_global_limits(
     pass1_individual_results: List[LimitsPassResult] = []
     error_tasks = 0
 
-    with ThreadPoolExecutor(
-        max_workers=config.max_threads, thread_name_prefix="Pass1_Limits"
-    ) as executor:
+    with get_executor(config) as executor:
         # Submit all tasks for limit calculation
         futures = {
             executor.submit(_task_calculate_limits, task, global_z_range): task

@@ -4,10 +4,11 @@ import logging
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import DefaultDict, List
+from typing import DefaultDict, List, Optional, Iterator
+from contextlib import contextmanager
+from concurrent.futures import Executor, ThreadPoolExecutor, ProcessPoolExecutor
 
-# Import data model - adjust if ChannelEntry moves later
-from .data_models import ChannelEntry
+from .data_models import ChannelEntry, PreprocessingConfig
 
 # --- Centralized Logging Setup ---
 # Configure logging once
@@ -17,9 +18,39 @@ logging.basicConfig(
 # Get a logger instance for this module
 log = logging.getLogger(__name__)
 
-# Define custom exception classes here if needed later
-# class PixelPackerError(Exception): ...
+@contextmanager
+def get_executor(config: PreprocessingConfig) -> Iterator[Executor]:
+    """Provides the configured executor (Thread or Process) as a context manager."""
+    executor_instance: Optional[Executor] = None
+    ExecutorClass = ThreadPoolExecutor # Default
+    executor_name = "thread"
+    # Prefix for thread names for easier debugging
+    thread_prefix = "PixelPacker"
 
+    if config.executor_type == "process":
+        # Use INFO level as this is a significant config choice
+        log.info(f"Creating ProcessPoolExecutor (max_workers={config.max_threads})")
+        ExecutorClass = ProcessPoolExecutor
+        executor_name = "process"
+        # Add warning about potential issues
+        log.debug("Note: ProcessPoolExecutor has higher overhead and requires arguments/results to be pickleable.")
+    else:
+        log.info(f"Creating ThreadPoolExecutor (max_workers={config.max_threads})")
+        # Pass thread_name_prefix only to ThreadPoolExecutor where it's supported
+        kwargs = {"max_workers": config.max_threads, "thread_name_prefix": thread_prefix}
+        executor_instance = ExecutorClass(**kwargs) # type: ignore # Handle potential type checking issue with kwargs
+
+    try:
+        # Create instance only if not already created (for ThreadPool case)
+        if executor_instance is None:
+             executor_instance = ExecutorClass(max_workers=config.max_threads)
+
+        yield executor_instance # Provide the executor to the 'with' block
+    finally:
+        # Ensure shutdown occurs reliably
+        if executor_instance:
+            log.debug(f"Shutting down {executor_name} executor.")
+            executor_instance.shutdown(wait=True) # Wait for tasks to complete
 
 TimepointsDict = DefaultDict[str, List[ChannelEntry]]
 

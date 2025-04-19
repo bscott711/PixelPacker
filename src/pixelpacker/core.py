@@ -167,6 +167,7 @@ def _setup_configuration(args: Dict[str, Any]) -> PreprocessingConfig:
             z_crop_method=args["--z-crop-method"],
             z_crop_threshold=int(args["--z-crop-threshold"]),
             use_global_contrast=args["--global-contrast"],
+            executor_type=args["--executor"],
             dry_run=args["--dry-run"],
             debug=args["--debug"],
             max_threads=int(args["--threads"]),

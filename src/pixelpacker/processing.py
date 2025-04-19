@@ -1,6 +1,6 @@
 # src/pixelpacker/processing.py
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
@@ -14,7 +14,7 @@ from .data_models import (
 from .io_utils import process_channel
 from .limits import LimitsPassResult  # Result from Pass 1
 from .stretch import ContrastLimits
-from .utils import log  # Use centralized logger
+from .utils import log, get_executor
 
 
 # === Pass 2: Process Channels (Tile & Save) ===
@@ -165,9 +165,7 @@ def execute_processing_pass(
     processed_count = 0
     error_count = 0
 
-    with ThreadPoolExecutor(
-        max_workers=config.max_threads, thread_name_prefix="Pass2_Process"
-    ) as executor:
+    with get_executor(config) as executor:
         futures = {}
         # Submit each Pass 1 result to the Pass 2 task function
         for p1_res in pass1_results:

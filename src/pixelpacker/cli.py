@@ -22,6 +22,10 @@ app = typer.Typer(
 class ZCropMethod(str, enum.Enum):
     slope = "slope"
     threshold = "threshold"
+
+class ExecutorChoice(str, enum.Enum):
+    thread = "thread"
+    process = "process"
 # --- End Enum ---
 
 def version_callback(value: bool):
@@ -65,6 +69,12 @@ def main(
         help="Apply contrast range globally (default). Use --no-global-contrast to disable."
     )] = True,
 
+    executor: Annotated[ExecutorChoice, typer.Option(
+        "--executor",
+        case_sensitive=False,
+        help="Concurrency execution model ('thread' or 'process'). Use 'process' for potentially faster CPU-bound tasks on multi-core machines, but be aware of higher overhead.",
+    )] = ExecutorChoice.thread,
+
     threads: Annotated[int, typer.Option(
         "--threads", "-t", min=1, help="Number of worker threads."
     )] = 8,
@@ -100,6 +110,7 @@ def main(
         log.debug(f"  Z-Crop Threshold: {z_crop_threshold}")
     log.debug(f"  Global Contrast: {global_contrast}")
     log.debug(f"  Threads: {threads}")
+    log.debug(f"  Executor Type: {executor.value}") 
     log.debug(f"  Dry Run: {dry_run}")
     log.debug(f"  Debug: {debug}")
 
@@ -111,6 +122,7 @@ def main(
         "--z-crop-method": z_crop_method.value,
         "--z-crop-threshold": z_crop_threshold,
         "--global-contrast": global_contrast,
+        "--executor": executor.value,
         "--threads": str(threads),
         "--dry-run": dry_run,
         "--debug": debug,

@@ -1,6 +1,6 @@
 # src/pixelpacker/crop.py
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -10,7 +10,7 @@ from tqdm import tqdm
 # Import necessary I/O and config/task definitions
 from .data_models import PreprocessingConfig, ProcessingTask
 from .io_utils import extract_original_volume, find_z_crop_range
-from .utils import log  # Use centralized logger
+from .utils import log, get_executor
 
 
 @dataclass
@@ -124,9 +124,7 @@ def determine_global_z_crop_and_dims(
     error_tasks = 0
     processed_tasks = 0
 
-    with ThreadPoolExecutor(
-        max_workers=config.max_threads, thread_name_prefix="Pass0_ZRange"
-    ) as executor:
+    with get_executor(config) as executor:
         futures = {
             executor.submit(_task_find_local_z_range, task): task for task in tasks
         }
