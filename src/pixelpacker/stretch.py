@@ -169,20 +169,16 @@ def _get_max_limits(data: np.ndarray) -> ContrastLimits:
 def _get_smart_limits(data: np.ndarray) -> ContrastLimits:
     """Calculates limits using dynamic 'early' cutoff for high and 1st percentile for low."""
     limits = _get_base_stats(data)
-    # *** FIX START: Provide default 0.0 if optional value is None ***
     limits.p_low = limits.p1 if limits.p1 is not None else 0.0
     limits.p_high = limits.smart_early if limits.smart_early is not None else 0.0
-    # *** FIX END ***
     return limits
 
 
 def _get_smart_late_limits(data: np.ndarray) -> ContrastLimits:
     """Calculates limits using dynamic 'late' cutoff for high and 1st percentile for low."""
     limits = _get_base_stats(data)
-    # *** FIX START: Provide default 0.0 if optional value is None ***
     limits.p_low = limits.p1 if limits.p1 is not None else 0.0
     limits.p_high = limits.smart_late if limits.smart_late is not None else 0.0
-    # *** FIX END ***
     return limits
 
 

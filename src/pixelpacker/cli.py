@@ -46,23 +46,19 @@ def main(
 
     stretch_mode: Annotated[str, typer.Option(
         "--stretch", "-s", help="Contrast stretch method."
-    )] = "smart-late",
+    )] = "smart",
 
-    # --- ADD Z-CROP METHOD OPTION ---
     z_crop_method: Annotated[ZCropMethod, typer.Option(
         "--z-crop-method",
         case_sensitive=False, # Allow 'slope' or 'SLOPE' etc.
         help="Method for automatic Z-cropping."
-    )] = ZCropMethod.slope, # Default to slope analysis
-    # --- END ADDED OPTION ---
+    )] = ZCropMethod.slope,
 
-    # --- RE-INTRODUCE Z-CROP THRESHOLD OPTION ---
     z_crop_threshold: Annotated[int, typer.Option(
         "--z-crop-threshold",
         min=0,
         help="Intensity threshold used ONLY if --z-crop-method=threshold."
-    )] = 0, # Default threshold value
-    # --- END RE-INTRODUCED OPTION ---
+    )] = 0,
 
     global_contrast: Annotated[bool, typer.Option(
         "--global-contrast / --no-global-contrast", "-g / ",
@@ -99,9 +95,9 @@ def main(
     log.debug(f"  Input Folder: {input_folder}")
     log.debug(f"  Output Folder: {output_folder}")
     log.debug(f"  Stretch Mode: {stretch_mode}")
-    log.debug(f"  Z-Crop Method: {z_crop_method.value}") # Log the selected method
+    log.debug(f"  Z-Crop Method: {z_crop_method.value}")
     if z_crop_method == ZCropMethod.threshold:
-        log.debug(f"  Z-Crop Threshold: {z_crop_threshold}") # Log threshold only if relevant
+        log.debug(f"  Z-Crop Threshold: {z_crop_threshold}")
     log.debug(f"  Global Contrast: {global_contrast}")
     log.debug(f"  Threads: {threads}")
     log.debug(f"  Dry Run: {dry_run}")
@@ -112,8 +108,8 @@ def main(
         "--input": str(input_folder),
         "--output": str(output_folder),
         "--stretch": stretch_mode,
-        "--z-crop-method": z_crop_method.value, # Pass method string
-        "--z-crop-threshold": z_crop_threshold, # Pass threshold value
+        "--z-crop-method": z_crop_method.value,
+        "--z-crop-threshold": z_crop_threshold,
         "--global-contrast": global_contrast,
         "--threads": str(threads),
         "--dry-run": dry_run,

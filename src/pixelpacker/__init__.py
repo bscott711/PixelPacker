@@ -17,7 +17,6 @@ except importlib.metadata.PackageNotFoundError:
 # --- Basic Logging Setup ---
 # Add a NullHandler to the package's root logger to avoid "No handler found"
 # warnings if used as a library and the application doesn't configure logging.
-# The application (like cli.py) is still responsible for adding actual handlers.
 handler = logging.NullHandler()
 log.addHandler(handler)
 log.debug("NullHandler added to pixelpacker root logger.")

@@ -31,12 +31,10 @@ except ImportError:
 WEBP_QUALITY = 87
 WEBP_METHOD = 6
 WEBP_LOSSLESS = False
-SMOOTHING_SIGMA_Z = 2.0  # Sigma for Gaussian smoothing of Z profile.
-SLOPE_WINDOW_Z = 2  # Number of consecutive slices to check slope sign
-SLOPE_THRESH_Z_POS = (
-    20  # Threshold for detecting significant positive slope (tune if needed)
-)
-MIN_SEARCH_OFFSET_Z = 3  # Start search slightly away from the edges
+SMOOTHING_SIGMA_Z = 2.0
+SLOPE_WINDOW_Z = 2
+SLOPE_THRESH_Z_POS = 20
+MIN_SEARCH_OFFSET_Z = 3
 
 
 # --- Helper to save debug NumPy arrays as images ---
@@ -267,14 +265,12 @@ def _find_z_crop_range_slope(
         output_folder.mkdir(parents=True, exist_ok=True)
 
         # Save MIPs (Check if they were calculated before potential error)
-        # --- FIX: Check if MIPs exist before using ---
         if mip_yz is not None and mip_xz is not None:
             mip_limits = calculate_limits_only(volume, stretch_mode="max")
             mip_yz_path = output_folder / f"{filename_prefix}_debug_mip_yz.png"
             _save_debug_array_as_image(mip_yz, mip_yz_path, mip_limits)
             mip_xz_path = output_folder / f"{filename_prefix}_debug_mip_xz.png"
             _save_debug_array_as_image(mip_xz, mip_xz_path, mip_limits)
-        # --- End FIX ---
         else:
             log.warning("MIP arrays not available for debug saving.")
 
@@ -365,7 +361,7 @@ def _find_z_crop_range_slope(
 def find_z_crop_range(
     volume: np.ndarray,
     method: str,
-    threshold: int,  # Keep threshold arg for 'threshold' method
+    threshold: int,
     debug: bool = False,
     output_folder: Optional[Path] = None,
     filename_prefix: str = "debug",
@@ -377,17 +373,14 @@ def find_z_crop_range(
         return _find_z_crop_range_slope(volume, debug, output_folder, filename_prefix)
     elif method == "threshold":
         log.info(f"Using simple threshold ({threshold}) for Z-cropping.")
-        # Threshold function doesn't currently save debug plots, but could be added
         return _find_z_crop_range_threshold(volume, threshold)
     else:
         log.warning(f"Unknown z_crop_method '{method}'. Defaulting to 'slope'.")
         return _find_z_crop_range_slope(volume, debug, output_folder, filename_prefix)
 
 
-# --- extract_original_volume (Unchanged) ---
 def extract_original_volume(tif_path: Path) -> Optional[np.ndarray]:
     """Extracts and reshapes the volume from a TIFF file to 3D (Z, Y, X)."""
-    # (Implementation unchanged)
     log.debug(f"Extracting original volume from: {tif_path}")
     if not tif_path.is_file():
         log.error(f"TIFF file not found: {tif_path}")
@@ -431,7 +424,6 @@ def extract_original_volume(tif_path: Path) -> Optional[np.ndarray]:
         return None
 
 
-# --- save_preview_slice, save_histogram_debug (Unchanged) ---
 def save_preview_slice(vol_8bit: np.ndarray, path: Path):
     if vol_8bit.ndim != 3 or vol_8bit.shape[0] == 0:
         log.warning(f"Cannot save preview: shape {vol_8bit.shape}")
@@ -543,8 +535,6 @@ def save_histogram_debug(
         log.debug(f"Saving histogram: {out_path}")
         fig.savefig(str(out_path), dpi=100)
     except Exception as e:
-        # --- Ruff Fix: F541 ---
-        # Removed f-string as no placeholders were used
         log.error(f"Failed histogram {out_path}: {e}", exc_info=True)
 
     finally:
@@ -552,7 +542,6 @@ def save_histogram_debug(
             plt.close(fig)
 
 
-# --- process_channel (Unchanged) ---
 def process_channel(
     time_id: str,
     ch_id: int,
@@ -565,7 +554,6 @@ def process_channel(
     output_folder: str = ".",
 ) -> Optional[Dict[str, Any]]:
     """Processes a single channel: tiles the already cropped/stretched volume and saves."""
-    # (Implementation unchanged)
     output_folder_obj = Path(output_folder)
     log.info(
         f"Processing T:{time_id} C:{ch_id} - Received Globally Cropped Shape: {globally_cropped_vol.shape}"
