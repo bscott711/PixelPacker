@@ -2,13 +2,11 @@
 
 # --- Standard Imports ---
 import math
-import time
+import time  # Added for timing
+import logging  # Added for logger access
 from typing import Any, Dict, List, Optional, Tuple
 
-
-# --- Centralized Utilities ---
-# Imports log, scan_and_parse_files, TimepointsDict from utils
-from .utils import log, scan_and_parse_files, TimepointsDict
+from .utils import scan_and_parse_files, TimepointsDict  # Keep existing imports
 
 # --- Refactored Modules ---
 from . import crop
@@ -24,11 +22,15 @@ from .data_models import (
     VolumeLayout,
 )
 
+
+# --- Centralized Utilities ---
+# Imports log, scan_and_parse_files, TimepointsDict from utils
+# Get logger instance directly if not already imported/available
+log = logging.getLogger(__name__)  # Ensures log is available
+
+
 # Type alias remains useful here
 TimepointResult = Dict[str, Any]
-
-# Configuration setup functions (_load_config_from_file, _setup_configuration)
-# have been moved to cli.py
 
 
 # === Layout Determination ===
@@ -42,23 +44,30 @@ def _determine_layout(
         if d <= 0:
             log.error(
                 f"Layout failed: Global depth calculation resulted in <= 0 ({d})"
-                f" from Z-range {global_z_range}"
+                f" from Z-range {global_z_range}",
+                extra={"z_range": global_z_range, "calculated_depth": d},
             )
             return None
         if base_width <= 0 or base_height <= 0:
             log.error(
-                f"Layout failed: Invalid base dimensions W={base_width}, H={base_height}."
+                f"Layout failed: Invalid base dimensions W={base_width}, H={base_height}.",
+                extra={"base_width": base_width, "base_height": base_height},
             )
             return None
         log.info(
-            f"Determining layout for base W={base_width}, H={base_height},"
-            f" Global Depth={d} (from Z-range {global_z_range})"
+            "Determining layout",
+            extra={
+                "base_width": base_width,
+                "base_height": base_height,
+                "global_depth": d,
+                "z_range": global_z_range,
+            },
         )
         cols = math.ceil(math.sqrt(d))
         rows = math.ceil(d / cols)
         tile_w = cols * base_width
         tile_h = rows * base_height
-        # Uses VolumeLayout imported from data_models
+
         layout = VolumeLayout(
             width=base_width,
             height=base_height,
@@ -69,12 +78,17 @@ def _determine_layout(
             tile_height=tile_h,
         )
         log.info(
-            f"Layout determined: Input Volume({base_width}x{base_height}x{d}),"
-            f" Output Tile({tile_w}x{tile_h}), Grid({cols}x{rows})"
+            "Layout determined",
+            extra={
+                "input_volume_WHD": (base_width, base_height, d),
+                "output_tile_WH": (tile_w, tile_h),
+                "grid_ColsRows": (cols, rows),
+                "layout_object": layout,  # Consider if logging the object is too verbose
+            },
         )
         return layout
     except Exception as e:
-        log.error(f"❌ Layout determination failed unexpectedly: {e}", exc_info=True)
+        log.error(f"Layout determination failed unexpectedly: {e}", exc_info=True)
         return None
 
 
@@ -84,109 +98,146 @@ def _prepare_tasks_and_layout(
 ) -> Tuple[Optional[Tuple[int, int]], Optional[VolumeLayout], List[ProcessingTask]]:
     """
     Orchestrates Pass 0 (via crop module), determines layout, and prepares tasks.
-    Args are typed using classes imported from data_models.
     """
     layout: Optional[VolumeLayout] = None
     global_z_range: Optional[Tuple[int, int]] = None
     base_dims: Optional[Tuple[int, int]] = None
-    # Type hint uses ProcessingTask imported from data_models
     tasks_to_submit: List[ProcessingTask] = []
     sorted_time_ids = sorted(timepoints_data.keys())
+
     if not sorted_time_ids:
         log.warning("No timepoints found in the scanned data. Cannot prepare tasks.")
         return None, None, []
+
     for time_id in sorted_time_ids:
-        # Assumes ChannelEntry is handled correctly within TimepointsDict typing
         for entry in timepoints_data[time_id]:
-            # Creates instance using ProcessingTask imported from data_models
             tasks_to_submit.append(ProcessingTask(time_id, entry, config))
+
     if not tasks_to_submit:
-        log.error("❌ Failed to create any processing tasks from input files.")
+        log.error("Failed to create any processing tasks from input files.")
         return None, None, []
+
     log.info(f"Prepared {len(tasks_to_submit)} initial tasks for Pass 0.")
+
     try:
-        # Calls crop.determine_global_z_crop_and_dims, passing instances
+        # Pass 0: Determine Global Z-Crop Range & Dimensions
+        # This internally calls crop.determine_global_z_crop_and_dims
         global_z_range, base_dims = crop.determine_global_z_crop_and_dims(
             tasks_to_submit, config
         )
     except Exception as e:
-        # Log error details if debug is enabled in config
-        log.error(
-            f"❌ Critical error during Pass 0 execution: {e}", exc_info=config.debug
-        )
+        log.error(f"Critical error during Pass 0 execution: {e}", exc_info=config.debug)
         return None, None, []
+
+    # Validate results from Pass 0
     if global_z_range is None:
         log.error("Aborting: Failed to determine global Z-crop range in Pass 0.")
         return None, None, []
     if base_dims is None:
         log.error("Aborting: Failed to determine base dimensions (W, H) in Pass 0.")
-        # If Z range is valid but dims failed, return Z range for potential debugging
         return global_z_range, None, []
+
     # Determine layout using the results from Pass 0
     layout = _determine_layout(base_dims[0], base_dims[1], global_z_range)
     if layout is None:
-        log.error("❌ Aborting: Failed to determine valid tile layout.")
-        # Return Z range if layout failed
+        log.error("Aborting: Failed to determine valid tile layout.")
         return global_z_range, None, []
+
     log.info(
-        f"✅ Task preparation complete. Found {len(tasks_to_submit)} tasks."
-        f" Global Z Range: {global_z_range}. Layout determined."
+        "Task preparation complete",
+        extra={
+            "num_tasks": len(tasks_to_submit),
+            "global_z_range": global_z_range,
+            "layout_determined": True,
+        },
     )
-    # Return type uses ProcessingTask imported from data_models
     return global_z_range, layout, tasks_to_submit
 
 
 # === Main Orchestration Function ===
-def run_preprocessing(config: PreprocessingConfig):  # Accepts config object
+def run_preprocessing(config: PreprocessingConfig):
     """
     Runs the main PixelPacker preprocessing pipeline using refactored modules.
 
     Args:
         config: The fully resolved PreprocessingConfig object.
     """
-    start_time = time.time()
-    # Pipeline start is logged in cli.py where config is finalized
+    pipeline_start_time = time.time()
+    # Log config only if debugging to avoid excessive log size
+    if config.debug:
+        # Use pformat for potentially large/nested config object
+        from pprint import pformat
+
+        log.debug("Core pipeline starting", extra={"config": pformat(config)})
+    else:
+        log.debug("Core pipeline starting")  # Simple message otherwise
+
+    # --- Prepare Timing Variables ---
+    timing_metrics: Dict[str, float] = {}  # Initialize dictionary
 
     try:
-        # Config object is passed in directly
-        log.debug(f"Core pipeline starting with config: {config}")
-
-        # File Scanning uses pattern from config
+        # --- File Scanning ---
+        scan_start = time.time()
         timepoints_data = scan_and_parse_files(
             config.input_folder, config.input_pattern
         )
+        scan_duration = time.time() - scan_start
+        timing_metrics["scan_files_sec"] = scan_duration
+        log.debug("Stage 'Scan Files' finished", extra={"duration_sec": scan_duration})
+
         if not timepoints_data:
             log.error("Aborting pipeline: No valid input files found or parsed.")
-            # Raise error to be caught by cli.py for cleaner exit code
             raise FileNotFoundError("No valid input files found or parsed.")
 
-        # Prepare Tasks, Run Pass 0, Determine Layout
+        # --- Task Prep / Pass 0 / Layout ---
+        prep_start = time.time()
         global_z_range, layout, tasks = _prepare_tasks_and_layout(
             config, timepoints_data
         )
+        prep_duration = time.time() - prep_start
+        timing_metrics["prep_pass0_layout_sec"] = prep_duration
+        log.debug(
+            "Stage 'Prep/Pass0/Layout' finished", extra={"duration_sec": prep_duration}
+        )
+
+        # Check results from prep stage
         if layout is None or not tasks or global_z_range is None:
-            # Error logged in _prepare_tasks_and_layout
+            # Specific error logged within _prepare_tasks_and_layout
             raise ValueError("Failed during task prep/Z-crop/layout phase.")
 
-        # Run Pass 1 (Calculate Limits)
+        # --- Pass 1 (Calculate Limits) ---
+        pass1_start = time.time()
         global_contrast_ranges, pass1_results = limits.calculate_global_limits(
             tasks, config, global_z_range
         )
-        # calculate_global_limits raises ValueError if Pass 1 critically fails
+        pass1_duration = time.time() - pass1_start
+        timing_metrics["pass1_limits_sec"] = pass1_duration
+        log.debug(
+            "Stage 'Pass 1 (Limits)' finished", extra={"duration_sec": pass1_duration}
+        )
+        # calculate_global_limits raises ValueError if it fails critically
 
-        # Run Pass 2 (Process Channels)
+        # --- Pass 2 (Process Channels) ---
+        pass2_start = time.time()
         limits_for_processing_pass = (
             global_contrast_ranges if config.use_global_contrast else None
         )
         final_results = processing.execute_processing_pass(
             pass1_results, config, layout, limits_for_processing_pass
         )
-        # Check if Pass 2 failed critically
+        pass2_duration = time.time() - pass2_start
+        timing_metrics["pass2_processing_sec"] = pass2_duration
+        log.debug(
+            "Stage 'Pass 2 (Processing)' finished",
+            extra={"duration_sec": pass2_duration},
+        )
+
+        # Check if Pass 2 failed critically (logged within execute_processing_pass)
         if not final_results and len(pass1_results) > 0:
-            # Error logged in execute_processing_pass
             raise RuntimeError("Pass 2 failed to process any channels.")
 
-        # Finalize Metadata & Write Manifest
+        # --- Manifest ---
+        manifest_start = time.time()
         actual_global_ranges_used = (
             global_contrast_ranges if config.use_global_contrast else None
         )
@@ -194,10 +245,25 @@ def run_preprocessing(config: PreprocessingConfig):  # Accepts config object
             final_results, layout, global_z_range, actual_global_ranges_used
         )
         manifest.write_manifest(metadata, config)
+        manifest_duration = time.time() - manifest_start
+        timing_metrics["manifest_sec"] = manifest_duration
+        log.debug(
+            "Stage 'Manifest' finished", extra={"duration_sec": manifest_duration}
+        )
 
     # Errors should propagate up to cli.py for handling there
     finally:
-        # Log core processing time
-        elapsed_time = time.time() - start_time
-        # Using a distinct emoji/prefix for core timing
-        log.info(f"⏱️ Core pipeline processing finished in {elapsed_time:.2f} seconds.")
+        # --- Log Final Timings ---
+        total_elapsed_time = time.time() - pipeline_start_time
+        timing_metrics["total_pipeline_sec"] = total_elapsed_time
+
+        # Always log the total time
+        log.info(f"⏱️ Pipeline finished. Total time: {total_elapsed_time:.2f}s.")
+
+        # Conditionally log the detailed stage breakdown if debug is enabled
+        # We check config directly, assuming run_preprocessing always receives it
+        if config and config.debug:
+            log.debug(
+                "Detailed stage timings (sec)",
+                extra={"stage_timings": timing_metrics},  # Log the dictionary
+            )
