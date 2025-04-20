@@ -2,6 +2,7 @@
 
 import math
 import time
+
 # REMOVE: from dataclasses import dataclass # No longer needed here
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,6 +28,7 @@ from .data_models import (
 
 # Type alias remains useful here (or could move to data_models)
 TimepointResult = Dict[str, Any]
+
 
 # === Layout Determination (Stays with Orchestration for now) ===
 def _determine_layout(
@@ -119,15 +121,17 @@ def _prepare_tasks_and_layout(
             tasks_to_submit, config
         )
     except Exception as e:
-        log.error(f"❌ Critical error during Pass 0 execution: {e}", exc_info=config.debug)
+        log.error(
+            f"❌ Critical error during Pass 0 execution: {e}", exc_info=config.debug
+        )
         return None, None, []
 
     if global_z_range is None:
         log.error("Aborting: Failed to determine global Z-crop range in Pass 0.")
         return None, None, []
     if base_dims is None:
-         log.error("Aborting: Failed to determine base dimensions (W, H) in Pass 0.")
-         return global_z_range, None, []
+        log.error("Aborting: Failed to determine base dimensions (W, H) in Pass 0.")
+        return global_z_range, None, []
 
     layout = _determine_layout(base_dims[0], base_dims[1], global_z_range)
     if layout is None:
@@ -163,10 +167,11 @@ def _setup_configuration(args: Dict[str, Any]) -> PreprocessingConfig:
         config = PreprocessingConfig(
             input_folder=input_folder,
             output_folder=output_folder,
+            input_pattern=args["--input-pattern"],
             stretch_mode=args["--stretch"],
             z_crop_method=args["--z-crop-method"],
             z_crop_threshold=int(args["--z-crop-threshold"]),
-            use_global_contrast=args["--global-contrast"],
+            use_global_contrast=args["--use-global-contrast"],
             executor_type=args["--executor"],
             dry_run=args["--dry-run"],
             debug=args["--debug"],
@@ -204,7 +209,9 @@ def run_preprocessing(args: Dict[str, Any]):
 
     try:
         config = _setup_configuration(args)
-        timepoints_data = scan_and_parse_files(config.input_folder)
+        timepoints_data = scan_and_parse_files(
+            config.input_folder, config.input_pattern
+        )
 
         if not timepoints_data:
             log.error("❌ Aborting: No valid input files found or parsed.")
@@ -215,7 +222,9 @@ def run_preprocessing(args: Dict[str, Any]):
         )
 
         if layout is None or not tasks or global_z_range is None:
-            log.error("❌ Aborting: Failed during task preparation, Z-cropping, or layout.")
+            log.error(
+                "❌ Aborting: Failed during task preparation, Z-cropping, or layout."
+            )
             return
 
         global_contrast_ranges, pass1_results = limits.calculate_global_limits(
@@ -230,7 +239,7 @@ def run_preprocessing(args: Dict[str, Any]):
         )
 
         actual_global_ranges_used = (
-             global_contrast_ranges if config.use_global_contrast else None
+            global_contrast_ranges if config.use_global_contrast else None
         )
         # Ensure final_results uses ProcessingResult imported from data_models
         metadata = manifest.finalize_metadata(

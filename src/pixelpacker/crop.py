@@ -179,18 +179,20 @@ def determine_global_z_crop_and_dims(
 
     # --- Validate Results ---
     if processed_tasks == 0:
-        log.error("❌ Pass 0 failed: No Z-range or dimensions could be determined from any files.")
+        log.error(
+            "❌ Pass 0 failed: No Z-range or dimensions could be determined from any files."
+        )
         return None, None
 
     if base_width is None or base_height is None:
         log.error("❌ Pass 0 failed: Could not determine base width/height.")
         # If we have a Z-range but no dims, return dims as None
         if min_z_start != float("inf") and max_z_end != float("-inf"):
-             global_z_start = int(min_z_start)
-             global_z_end = int(max_z_end)
-             if global_z_start <= global_z_end:
-                 return (global_z_start, global_z_end), None
-        return None, None # No usable results
+            global_z_start = int(min_z_start)
+            global_z_end = int(max_z_end)
+            if global_z_start <= global_z_end:
+                return (global_z_start, global_z_end), None
+        return None, None  # No usable results
 
     if min_z_start == float("inf") or max_z_end == float("-inf"):
         log.error(
@@ -209,7 +211,7 @@ def determine_global_z_crop_and_dims(
             f"❌ Pass 0 failed: Determined Z-range is invalid"
             f" [{global_z_start}, {global_z_end}]. Min start is after Max end."
         )
-        return None, (base_width, base_height) # Return valid dims
+        return None, (base_width, base_height)  # Return valid dims
 
     log.info(
         f"✅ Pass 0 finished. Global Z-crop range: [{global_z_start}, {global_z_end}]."
