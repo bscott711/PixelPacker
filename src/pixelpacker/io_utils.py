@@ -602,7 +602,19 @@ def process_channel(
                     log.error(f"Paste coords OOB. Skipping slice {i}.")
 
             out_path = output_folder_obj / out_file
-            log.debug(f"Saving tiled WebP image to: {out_path}")
+            log.debug(f"Attempting to save tiled WebP image to: {out_path}")
+
+            # --- Added Directory Check/Creation ---
+            try:
+                # Explicitly ensure the directory exists right before saving
+                output_folder_obj.mkdir(parents=True, exist_ok=True)
+            except Exception as mkdir_e:
+                # Log error if even this redundant mkdir fails
+                log.error(
+                    f"Failed to create output directory {output_folder_obj} just before saving {out_file}: {mkdir_e}",
+                    exc_info=True,
+                )
+                return None  # Cannot save if directory creation failed
 
             try:
                 tiled_img.save(

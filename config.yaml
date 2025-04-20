@@ -1,0 +1,16 @@
+# Example config.yaml for pixelpacker
+
+input_folder: "./Input_TIFFS"
+output_folder: "./volumes/config_test"
+
+# # --- Added required arguments with defaults ---
+# stretch_mode: "smart"
+# z_crop_method: "slope"
+# z_crop_threshold: 0
+# dry_run: False
+# debug: True
+# max_threads: 8
+# use_global_contrast: True # Optional: Default is True (equivalent to NOT using --per-image-contrast)
+# executor_type: "process" # Optional: Default is 'process'
+# input_pattern: "*_ch*_stack*.tif*" # Optional: Default pattern
+# # --- End added arguments ---
