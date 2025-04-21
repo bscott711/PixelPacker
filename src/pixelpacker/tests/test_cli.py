@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import pytest
 from typer.testing import CliRunner
+import re
 
 from pixelpacker.cli import app, _load_config_from_file
 from pixelpacker import __version__
@@ -32,13 +33,17 @@ def test_cli_help(runner: CliRunner):
 
     # Use strip() on the output to remove leading/trailing whitespace/newlines
     output_stripped = result.output.strip()
-    # Check basic usage line starts correctly
-    assert output_stripped.startswith("Usage: main [OPTIONS]")
 
-    # Check for key arguments and the help flag itself are present
+    # Check basic usage line starts correctly, allowing for ANSI codes
+    # Regex: Optional ANSI codes (like \x1b[...m) at start, then whitespace, then Usage: main [OPTIONS]
+    usage_pattern = re.compile(r"^(?:\x1b\[[0-9;]*m)*\s*Usage: main \[OPTIONS\]")
+    assert usage_pattern.match(output_stripped), (
+        f"Usage line did not match expected pattern. Output:\n{output_stripped}"
+    )
+
+    # Keep checks for key arguments
     assert "--input" in result.output
     assert "--output" in result.output
-    # assert "Input folder containing TIFF files." in result.output # <-- REMOVE this line
     assert "--help" in result.output
 
 
