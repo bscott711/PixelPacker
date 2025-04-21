@@ -26,11 +26,13 @@ def test_cli_version(runner: CliRunner):
 
 
 # Regex to find ANSI escape codes
-ANSI_ESCAPE_REGEX = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+ANSI_ESCAPE_REGEX = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
 
 def strip_ansi(text: str) -> str:
     """Removes ANSI escape codes from a string."""
-    return ANSI_ESCAPE_REGEX.sub('', text)
+    return ANSI_ESCAPE_REGEX.sub("", text)
+
 
 @pytest.mark.cli
 def test_cli_help(runner: CliRunner):
@@ -44,13 +46,14 @@ def test_cli_help(runner: CliRunner):
     output_clean = output_no_ansi.strip()
 
     # 3. Assert startswith on the cleaned string
-    assert output_clean.startswith("Usage: main [OPTIONS]"), \
+    assert output_clean.startswith("Usage: main [OPTIONS]"), (
         f"Cleaned usage line did not start as expected.\nCleaned output:\n>>>\n{output_clean}\n<<<"
+    )
 
     # 4. Check for key arguments in the CLEANED output
-    assert "--input" in output_clean # Use cleaned output
-    assert "--output" in output_clean # Use cleaned output
-    assert "--help" in output_clean # Use cleaned output
+    assert "--input" in output_clean  # Use cleaned output
+    assert "--output" in output_clean  # Use cleaned output
+    assert "--help" in output_clean  # Use cleaned output
 
 
 @pytest.mark.cli
