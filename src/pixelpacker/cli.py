@@ -229,7 +229,9 @@ def main(  # noqa: PLR0913
         }
 
         for param_name, param_def in typer_param_defs.items():
-            potential_config_key = param_to_config_map.get(param_name) if param_name is not None else None
+            potential_config_key = (
+                param_to_config_map.get(param_name) if param_name is not None else None
+            )
             if potential_config_key is None:
                 continue
 
@@ -269,11 +271,15 @@ def main(  # noqa: PLR0913
                             config_dict[key] = int(value)
                         elif key == "max_threads" and value is not None:
                             config_dict[key] = int(value)
-                        elif key in [
-                            "use_global_contrast",
-                            "dry_run",
-                            "debug",
-                        ] and value is not None:
+                        elif (
+                            key
+                            in [
+                                "use_global_contrast",
+                                "dry_run",
+                                "debug",
+                            ]
+                            and value is not None
+                        ):
                             config_dict[key] = bool(value)
                         elif key == "z_crop_method" and isinstance(value, str):
                             config_dict[key] = ZCropMethod(value).value
@@ -311,7 +317,7 @@ def main(  # noqa: PLR0913
         else:
             log.debug("No configuration file provided.")
 
-         # 3. CLI overrides
+        # 3. CLI overrides
         cli_applied_values: Dict[str, Any] = {}
         for param_name, cli_arg_value in ctx.params.items():
             if param_name == "config_file":
@@ -326,7 +332,9 @@ def main(  # noqa: PLR0913
             # only override if the user actually passed this on the CLI
             source = ctx.get_parameter_source(param_name)
             if source is not click.core.ParameterSource.COMMANDLINE:
-                log.debug(f"Skipping '{param_name}': not provided via CLI (source={source})")
+                log.debug(
+                    f"Skipping '{param_name}': not provided via CLI (source={source})"
+                )
                 continue
 
             # special per-image-contrast handling
@@ -348,7 +356,9 @@ def main(  # noqa: PLR0913
                 if isinstance(cli_arg_value, enum.Enum):
                     final = cli_arg_value.value
                 elif is_path:
-                    final = None if cli_arg_value is None else Path(cli_arg_value).resolve()
+                    final = (
+                        None if cli_arg_value is None else Path(cli_arg_value).resolve()
+                    )
                 elif field is int and cli_arg_value is not None:
                     final = int(cli_arg_value)
                 elif field is bool and cli_arg_value is not None:
@@ -368,7 +378,6 @@ def main(  # noqa: PLR0913
         if cli_applied_values:
             log.info("Applied CLI overrides: %s", cli_applied_values)
 
-
         # 4. Final Validation and Instantiation
         input_val = config_dict.get("input_folder")
         output_val = config_dict.get("output_folder")
@@ -382,9 +391,9 @@ def main(  # noqa: PLR0913
 
         # Type checks remain useful defense
         if not isinstance(input_val, Path):
-             raise TypeError(f"Input folder must be a valid path, got: {input_val}")
+            raise TypeError(f"Input folder must be a valid path, got: {input_val}")
         if not isinstance(output_val, Path):
-             raise TypeError(f"Output folder must be a valid path, got: {output_val}")
+            raise TypeError(f"Output folder must be a valid path, got: {output_val}")
 
         # Ensure output directory exists and is writable
         output_dir_path = output_val
@@ -406,20 +415,18 @@ def main(  # noqa: PLR0913
 
         # 5. Create final PreprocessingConfig object
         valid_keys = PreprocessingConfig.__dataclass_fields__.keys()
-        final_config_data = {
-            k: v for k, v in config_dict.items() if k in valid_keys
-        }
+        final_config_data = {k: v for k, v in config_dict.items() if k in valid_keys}
 
         try:
-             final_config = PreprocessingConfig(**final_config_data)
+            final_config = PreprocessingConfig(**final_config_data)
         except TypeError as e:
-             log.error(
-                 "Configuration Error: Missing or incorrect arguments for"
-                 f" PreprocessingConfig: {e}"
-             )
-             raise ValueError(
-                 f"Missing/incorrect configuration arguments. Details: {e}"
-             ) from e
+            log.error(
+                "Configuration Error: Missing or incorrect arguments for"
+                f" PreprocessingConfig: {e}"
+            )
+            raise ValueError(
+                f"Missing/incorrect configuration arguments. Details: {e}"
+            ) from e
 
         log.info("Preprocessing configuration merged successfully.")
         log.debug(f"Final configuration: {final_config}")
@@ -458,7 +465,7 @@ def main(  # noqa: PLR0913
     ) as e:
         # Fix: Use standard logging format, remove f-string
         log.error("❌ Configuration Error: %s", e)
-        if initial_cli_debug_value: # Log state only if debug was *initially* requested
+        if initial_cli_debug_value:  # Log state only if debug was *initially* requested
             log.debug(f"Problematic config_dict state during error: {config_dict}")
         raise typer.Exit(code=1)
     except Exception as e:
@@ -467,11 +474,12 @@ def main(  # noqa: PLR0913
 
     # --- Run Core Processing ---
     try:
-        run_preprocessing(config=final_config)
+        run_preprocessing(config=final_config)  # Calls the modified core function
         log.info("✅ Preprocessing finished successfully.")
+    # This existing block will catch the new RuntimeError from core.py
     except (ValueError, FileNotFoundError, OSError, TypeError, RuntimeError) as e:
         log.error(f"❌ Pipeline Error: {e}", exc_info=final_config.debug)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1)  # Exits with non-zero code
     except Exception as e:
         log.critical(
             f"❌ An unexpected critical pipeline error occurred: {e}", exc_info=True

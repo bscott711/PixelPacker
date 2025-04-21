@@ -137,7 +137,7 @@ def execute_processing_pass(
     config: PreprocessingConfig,
     layout: VolumeLayout,
     global_contrast_ranges: Optional[Dict[int, Tuple[float, float]]] = None,
-) -> List[ProcessingResult]:
+) -> Tuple[List[ProcessingResult], int]:
     """
     Pass 2 Orchestrator: Executes the main processing (tiling, saving) for each task.
 
@@ -159,7 +159,7 @@ def execute_processing_pass(
     num_tasks = len(pass1_results)
     if num_tasks == 0:
         log.warning("Pass 2 received no results from Pass 1 to process.")
-        return []
+        return [], 0
 
     final_results: List[ProcessingResult] = []
     processed_count = 0
@@ -228,4 +228,4 @@ def execute_processing_pass(
     if processed_count == 0 and num_tasks > 0:
          log.error("❌ Pass 2 critical failure: No channels were successfully processed.")
 
-    return final_results
+    return final_results, error_count

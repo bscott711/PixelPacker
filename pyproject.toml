@@ -47,6 +47,7 @@ markers = [
     "unit: mark test as a unit test (fast, isolated)",
     "integration: mark test as an integration test (slower, end-to-end)",
     "cli: mark test as a CLI test (requires command line interface)",
+    "mock: mark test as a mock test (uses mocking)",
 ]
 
 [project.scripts]

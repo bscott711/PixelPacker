@@ -222,7 +222,7 @@ def run_preprocessing(config: PreprocessingConfig):
         limits_for_processing_pass = (
             global_contrast_ranges if config.use_global_contrast else None
         )
-        final_results = processing.execute_processing_pass(
+        final_results, processing_error_count = processing.execute_processing_pass(
             pass1_results, config, layout, limits_for_processing_pass
         )
         pass2_duration = time.time() - pass2_start
@@ -231,6 +231,10 @@ def run_preprocessing(config: PreprocessingConfig):
             "Stage 'Pass 2 (Processing)' finished",
             extra={"duration_sec": pass2_duration},
         )
+        
+        if processing_error_count > 0:
+            log.error(f"❌ Pipeline aborted: Encountered {processing_error_count} error(s) during channel processing.")
+            raise RuntimeError(f"Pipeline completed with {processing_error_count} processing error(s).")
 
         # Check if Pass 2 failed critically (logged within execute_processing_pass)
         if not final_results and len(pass1_results) > 0:
