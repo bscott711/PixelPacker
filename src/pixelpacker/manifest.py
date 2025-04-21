@@ -36,37 +36,36 @@ def finalize_metadata(
     """
     log.info("📝 Finalizing metadata for manifest...")
     metadata: Dict[str, Any] = {
-        "tile_layout": {
-            "cols": layout.cols,
-             "rows": layout.rows
-             },
+        "tile_layout": {"cols": layout.cols, "rows": layout.rows},
         "volume_size": {
             "width": layout.width,
             "height": layout.height,
-            "depth": layout.depth, # Depth after global Z-crop
+            "depth": layout.depth,  # Depth after global Z-crop
         },
-        "channels": 0, # Will be calculated
-        "global_z_crop_range": list(global_z_range), # [start, end]
+        "channels": 0,  # Will be calculated
+        "global_z_crop_range": list(global_z_range),  # [start, end]
         "timepoints": [],
         # This field structure might change based on multi-channel needs
         "global_intensity": {},
     }
 
     if not results:
-        log.warning("No successful processing results found. Manifest may be incomplete.")
+        log.warning(
+            "No successful processing results found. Manifest may be incomplete."
+        )
         # Return the basic structure even if empty
         return metadata
 
     # Group results by timepoint
     timepoints_results: DefaultDict[str, TimepointResult] = defaultdict(
-        lambda: {"time": None, "files": {}} # Structure per timepoint
+        lambda: {"time": None, "files": {}}  # Structure per timepoint
     )
     max_channel = -1
 
     for res in results:
         res_time = res.time_id
         res_ch = res.channel
-        max_channel = max(max_channel, res_ch) # Track highest channel index
+        max_channel = max(max_channel, res_ch)  # Track highest channel index
 
         # Store time ID if not already set for this timepoint
         if timepoints_results[res_time]["time"] is None:
@@ -75,7 +74,7 @@ def finalize_metadata(
         # Add file info under the correct channel key (e.g., "c0", "c1")
         timepoints_results[res_time]["files"][f"c{res_ch}"] = {
             "file": res.filename,
-            "p_low": res.p_low, # Contrast limits actually used
+            "p_low": res.p_low,  # Contrast limits actually used
             "p_high": res.p_high,
         }
 
@@ -88,7 +87,9 @@ def finalize_metadata(
     metadata["timepoints"] = [
         timepoints_results[tid]
         for tid in processed_time_ids
-        if timepoints_results[tid]["files"] # Only include timepoints with processed files
+        if timepoints_results[tid][
+            "files"
+        ]  # Only include timepoints with processed files
     ]
 
     # Populate the 'global_intensity' field
@@ -102,8 +103,8 @@ def finalize_metadata(
         # If per-image contrast was used, calculate the overall min/max
         # *retrospectively* from the individual results for informational purposes.
         log.info(
-             "Calculating retrospective 'global_intensity' from per-image results."
-             " Note: These ranges were not necessarily applied globally."
+            "Calculating retrospective 'global_intensity' from per-image results."
+            " Note: These ranges were not necessarily applied globally."
         )
         all_channels = set(res.channel for res in results)
         for ch in all_channels:
@@ -114,8 +115,8 @@ def finalize_metadata(
                 high = max(res.p_high for res in channel_results)
                 final_global_intensity[f"c{ch}"] = {"p_low": low, "p_high": high}
             else:
-                 # Should not happen if all_channels is derived from results, but safe fallback
-                 final_global_intensity[f"c{ch}"] = {"p_low": 0.0, "p_high": 0.0}
+                # Should not happen if all_channels is derived from results, but safe fallback
+                final_global_intensity[f"c{ch}"] = {"p_low": 0.0, "p_high": 0.0}
     metadata["global_intensity"] = final_global_intensity
 
     log.info("Metadata finalized successfully.")
@@ -150,7 +151,10 @@ def write_manifest(metadata: Dict[str, Any], config: PreprocessingConfig):
             json.dump(metadata, f, indent=2)
         log.info("Manifest file saved successfully.")
     except OSError as e:
-        log.error(f"❌ Failed to write manifest file '{manifest_path}': {e}", exc_info=config.debug)
+        log.error(
+            f"❌ Failed to write manifest file '{manifest_path}': {e}",
+            exc_info=config.debug,
+        )
     except Exception as e:
         # Catch other potential errors during JSON serialization etc.
         log.error(f"❌ Unexpected error writing manifest: {e}", exc_info=config.debug)

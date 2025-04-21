@@ -61,7 +61,7 @@ def sample_config(tmp_path: Path) -> PreprocessingConfig:
         dry_run=False,
         debug=False,
         max_threads=1,
-        use_global_contrast=False, # Default case
+        use_global_contrast=False,  # Default case
         executor_type="process",
         input_pattern="*.tif",
     )
@@ -69,10 +69,11 @@ def sample_config(tmp_path: Path) -> PreprocessingConfig:
 
 # --- Tests for finalize_metadata ---
 
+
 @pytest.mark.unit
 def test_finalize_metadata_structure(sample_results, sample_layout):
     """Verify the basic structure and content of the finalized metadata."""
-    global_z = (5, 16) # depth = 16 - 5 + 1 = 12, matches layout
+    global_z = (5, 16)  # depth = 16 - 5 + 1 = 12, matches layout
     metadata = finalize_metadata(sample_results, sample_layout, global_z, None)
 
     assert metadata["tile_layout"]["cols"] == sample_layout.cols
@@ -80,9 +81,9 @@ def test_finalize_metadata_structure(sample_results, sample_layout):
     assert metadata["volume_size"]["width"] == sample_layout.width
     assert metadata["volume_size"]["height"] == sample_layout.height
     assert metadata["volume_size"]["depth"] == sample_layout.depth
-    assert metadata["channels"] == 2 # 0 and 1
+    assert metadata["channels"] == 2  # 0 and 1
     assert metadata["global_z_crop_range"] == list(global_z)
-    assert len(metadata["timepoints"]) == 2 # stack0000 and stack0001
+    assert len(metadata["timepoints"]) == 2  # stack0000 and stack0001
 
     tp0 = next(tp for tp in metadata["timepoints"] if tp["time"] == "stack0000")
     tp1 = next(tp for tp in metadata["timepoints"] if tp["time"] == "stack0001")
@@ -90,7 +91,7 @@ def test_finalize_metadata_structure(sample_results, sample_layout):
     assert "c0" in tp0["files"]
     assert "c1" in tp0["files"]
     assert "c0" in tp1["files"]
-    assert "c1" not in tp1["files"] # Channel 1 only exists for time 0
+    assert "c1" not in tp1["files"]  # Channel 1 only exists for time 0
 
     assert tp0["files"]["c0"]["file"] == "volume_stack0000_c0.webp"
     assert tp0["files"]["c0"]["p_low"] == 10.0
@@ -114,19 +115,17 @@ def test_finalize_metadata_global_intensity_per_image(sample_results, sample_lay
     assert "c1" in metadata["global_intensity"]
 
     # Should be min of lows and max of highs for each channel
-    assert metadata["global_intensity"]["c0"]["p_low"] == 10.0 # min(10.0, 15.0)
-    assert metadata["global_intensity"]["c0"]["p_high"] == 550.0 # max(500.0, 550.0)
-    assert metadata["global_intensity"]["c1"]["p_low"] == 200.0 # Only one value
-    assert metadata["global_intensity"]["c1"]["p_high"] == 1000.0 # Only one value
+    assert metadata["global_intensity"]["c0"]["p_low"] == 10.0  # min(10.0, 15.0)
+    assert metadata["global_intensity"]["c0"]["p_high"] == 550.0  # max(500.0, 550.0)
+    assert metadata["global_intensity"]["c1"]["p_low"] == 200.0  # Only one value
+    assert metadata["global_intensity"]["c1"]["p_high"] == 1000.0  # Only one value
 
 
 @pytest.mark.unit
 def test_finalize_metadata_global_intensity_provided(sample_results, sample_layout):
     """Test population of global intensity when global ranges were provided."""
     global_ranges = {0: (12.0, 525.0), 1: (210.0, 990.0)}
-    metadata = finalize_metadata(
-        sample_results, sample_layout, (0, 11), global_ranges
-    )
+    metadata = finalize_metadata(sample_results, sample_layout, (0, 11), global_ranges)
 
     assert "c0" in metadata["global_intensity"]
     assert "c1" in metadata["global_intensity"]
@@ -146,10 +145,11 @@ def test_finalize_metadata_empty_results(sample_layout):
     assert metadata["channels"] == 0
     assert len(metadata["timepoints"]) == 0
     assert len(metadata["global_intensity"]) == 0
-    assert metadata["global_z_crop_range"] == [0, 11] # Still populated
+    assert metadata["global_z_crop_range"] == [0, 11]  # Still populated
 
 
 # --- Tests for write_manifest ---
+
 
 @pytest.mark.unit
 def test_write_manifest_creates_file(sample_config, sample_results, sample_layout):
@@ -180,8 +180,7 @@ def test_write_manifest_dry_run(sample_config, sample_results, sample_layout):
 
     # Output dir might not exist in dry run
     if not sample_config.output_folder.exists():
-         sample_config.output_folder.mkdir(parents=True, exist_ok=True)
-
+        sample_config.output_folder.mkdir(parents=True, exist_ok=True)
 
     assert not manifest_path.is_file()
     write_manifest(metadata, sample_config)
@@ -191,14 +190,14 @@ def test_write_manifest_dry_run(sample_config, sample_results, sample_layout):
 @pytest.mark.unit
 def test_write_manifest_no_timepoints(sample_config, sample_layout):
     """Test that write_manifest skips writing if metadata has no timepoints."""
-    metadata = finalize_metadata([], sample_layout, (0, 11), None) # Empty results
+    metadata = finalize_metadata([], sample_layout, (0, 11), None)  # Empty results
     manifest_path = sample_config.output_folder / "manifest.json"
 
     sample_config.output_folder.mkdir(parents=True, exist_ok=True)
 
     assert not manifest_path.is_file()
     write_manifest(metadata, sample_config)
-    assert not manifest_path.is_file() # Should not write file
+    assert not manifest_path.is_file()  # Should not write file
 
 
 @pytest.mark.unit

@@ -231,10 +231,14 @@ def run_preprocessing(config: PreprocessingConfig):
             "Stage 'Pass 2 (Processing)' finished",
             extra={"duration_sec": pass2_duration},
         )
-        
+
         if processing_error_count > 0:
-            log.error(f"❌ Pipeline aborted: Encountered {processing_error_count} error(s) during channel processing.")
-            raise RuntimeError(f"Pipeline completed with {processing_error_count} processing error(s).")
+            log.error(
+                f"❌ Pipeline aborted: Encountered {processing_error_count} error(s) during channel processing."
+            )
+            raise RuntimeError(
+                f"Pipeline completed with {processing_error_count} processing error(s)."
+            )
 
         # Check if Pass 2 failed critically (logged within execute_processing_pass)
         if not final_results and len(pass1_results) > 0:

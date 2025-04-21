@@ -5,17 +5,22 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from pixelpacker.cli import app # Import the Typer app
+from pixelpacker.cli import app  # Import the Typer app
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 INPUT_DATA_DIR = PROJECT_ROOT / "Input_TIFFS"
 
 if not INPUT_DATA_DIR.is_dir() or not list(INPUT_DATA_DIR.glob("*.tif*")):
-    pytest.skip("Test input data not found or git-lfs files not pulled.", allow_module_level=True)
+    pytest.skip(
+        "Test input data not found or git-lfs files not pulled.",
+        allow_module_level=True,
+    )
+
 
 @pytest.fixture
 def runner() -> CliRunner:
     return CliRunner()
+
 
 # ADD MARKER HERE (and to all other test functions in this file)
 @pytest.mark.integration
@@ -28,13 +33,17 @@ def test_pipeline_runs_successfully(runner: CliRunner, tmp_path: Path):
     output_dir.mkdir()
 
     args = [
-        "--input", str(INPUT_DATA_DIR),
-        "--output", str(output_dir),
+        "--input",
+        str(INPUT_DATA_DIR),
+        "--output",
+        str(output_dir),
     ]
     result = runner.invoke(app, args)
 
     print("CLI Output:\n", result.stdout)
-    assert result.exit_code == 0, f"CLI exited with code {result.exit_code}\nOutput:\n{result.stdout}"
+    assert result.exit_code == 0, (
+        f"CLI exited with code {result.exit_code}\nOutput:\n{result.stdout}"
+    )
 
     manifest_path = output_dir / "manifest.json"
     assert manifest_path.is_file(), "manifest.json was not created"
@@ -43,7 +52,7 @@ def test_pipeline_runs_successfully(runner: CliRunner, tmp_path: Path):
     assert len(webp_files) == 10, f"Expected 10 .webp files, found {len(webp_files)}"
 
     try:
-        with open(manifest_path, 'r') as f:
+        with open(manifest_path, "r") as f:
             manifest_data = json.load(f)
         assert len(manifest_data["timepoints"]) == 10
         tp0 = manifest_data["timepoints"][0]
@@ -54,6 +63,7 @@ def test_pipeline_runs_successfully(runner: CliRunner, tmp_path: Path):
     except Exception as e:
         pytest.fail(f"Error checking manifest content: {e}")
 
+
 @pytest.mark.integration
 def test_pipeline_with_global_contrast_and_debug(runner: CliRunner, tmp_path: Path):
     """Test pipeline with global contrast and debug flags enabled."""
@@ -61,15 +71,19 @@ def test_pipeline_with_global_contrast_and_debug(runner: CliRunner, tmp_path: Pa
     output_dir.mkdir()
 
     args = [
-        "--input", str(INPUT_DATA_DIR),
-        "--output", str(output_dir),
+        "--input",
+        str(INPUT_DATA_DIR),
+        "--output",
+        str(output_dir),
         "--global-contrast",
         "--debug",
         "--stretch=imagej-auto",
     ]
     result = runner.invoke(app, args)
 
-    assert result.exit_code == 0, f"CLI exited with code {result.exit_code} (global/debug)\nOutput:\n{result.stdout}"
+    assert result.exit_code == 0, (
+        f"CLI exited with code {result.exit_code} (global/debug)\nOutput:\n{result.stdout}"
+    )
 
     assert (output_dir / "manifest.json").is_file()
     assert len(list(output_dir.glob("volume_*.webp"))) == 10
@@ -77,4 +91,3 @@ def test_pipeline_with_global_contrast_and_debug(runner: CliRunner, tmp_path: Pa
     preview_files = list(output_dir.glob("preview_*.png"))
     assert len(hist_files) == 10, "Expected 10 debug histogram files"
     assert len(preview_files) == 10, "Expected 10 debug preview files"
-

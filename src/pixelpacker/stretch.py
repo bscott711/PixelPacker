@@ -29,8 +29,9 @@ log = logging.getLogger(__name__)
 @dataclass
 class ContrastLimits:
     """Holds various calculated intensity limits for stretching and debugging."""
+
     p_low: float = 0.0  # The actual lower bound used for stretching
-    p_high: float = 0.0 # The actual upper bound used for stretching
+    p_high: float = 0.0  # The actual upper bound used for stretching
     # --- Values primarily for debug histogram ---
     p1: Optional[float] = None  # 1st percentile
     p035: Optional[float] = None  # 0.35 percentile (ImageJ Low)
@@ -52,8 +53,10 @@ def compute_dynamic_cutoffs(pixels: np.ndarray) -> Tuple[float, float]:
 
     pixels = pixels[np.isfinite(pixels)]
     if pixels.size == 0:
-         log.warning("compute_dynamic_cutoffs received array with only non-finite values.")
-         return 0.0, 0.0
+        log.warning(
+            "compute_dynamic_cutoffs received array with only non-finite values."
+        )
+        return 0.0, 0.0
 
     pixels_min = float(pixels.min())
     pixels_max = float(pixels.max())
@@ -66,8 +69,8 @@ def compute_dynamic_cutoffs(pixels: np.ndarray) -> Tuple[float, float]:
             pixels, bins=HIST_BINS, range=(pixels_min, pixels_max)
         )
         if np.sum(hist) == 0:
-             log.warning("Histogram is empty after filtering. Falling back to min/max.")
-             return pixels_min, pixels_max
+            log.warning("Histogram is empty after filtering. Falling back to min/max.")
+            return pixels_min, pixels_max
 
         log_hist = np.log10(hist.astype(np.float32) + LOG_HIST_EPSILON)
         slope = np.gradient(log_hist)
@@ -98,11 +101,21 @@ def compute_dynamic_cutoffs(pixels: np.ndarray) -> Tuple[float, float]:
                     late_cutoff_candidate = float(bin_centers[i])
                     break
 
-        early_cutoff = early_cutoff_candidate if early_cutoff_candidate is not None else float(np.percentile(pixels, FALLBACK_EARLY_PERCENTILE))
-        late_cutoff = late_cutoff_candidate if late_cutoff_candidate is not None else float(np.percentile(pixels, FALLBACK_LATE_PERCENTILE))
+        early_cutoff = (
+            early_cutoff_candidate
+            if early_cutoff_candidate is not None
+            else float(np.percentile(pixels, FALLBACK_EARLY_PERCENTILE))
+        )
+        late_cutoff = (
+            late_cutoff_candidate
+            if late_cutoff_candidate is not None
+            else float(np.percentile(pixels, FALLBACK_LATE_PERCENTILE))
+        )
 
         if early_cutoff >= late_cutoff:
-            log.warning(f"Dynamic cutoffs crossed or collapsed (early={early_cutoff:.2f}, late={late_cutoff:.2f}). Falling back to min/max.")
+            log.warning(
+                f"Dynamic cutoffs crossed or collapsed (early={early_cutoff:.2f}, late={late_cutoff:.2f}). Falling back to min/max."
+            )
             early_cutoff, late_cutoff = pixels_min, pixels_max
 
         return float(early_cutoff), float(late_cutoff)
@@ -190,6 +203,7 @@ LIMIT_CALCULATORS: Dict[str, LimitCalculator] = {
     "smart-late": _get_smart_late_limits,
 }
 
+
 # --- Main Function to Calculate Limits ---
 def calculate_limits_only(img: np.ndarray, stretch_mode: str) -> ContrastLimits:
     """
@@ -202,11 +216,15 @@ def calculate_limits_only(img: np.ndarray, stretch_mode: str) -> ContrastLimits:
     try:
         data = img[img > 0].flatten()
         if data.size == 0:
-            log.warning("No positive pixel values found for limit calculation. Using all pixels.")
+            log.warning(
+                "No positive pixel values found for limit calculation. Using all pixels."
+            )
             data = img.flatten()
             if data.size == 0:
-                 log.warning("Image data is effectively empty after filtering. Returning default limits.")
-                 return _get_base_stats(np.array([], dtype=img.dtype))
+                log.warning(
+                    "Image data is effectively empty after filtering. Returning default limits."
+                )
+                return _get_base_stats(np.array([], dtype=img.dtype))
 
         calculator = LIMIT_CALCULATORS.get(stretch_mode)
         if calculator:
@@ -218,7 +236,7 @@ def calculate_limits_only(img: np.ndarray, stretch_mode: str) -> ContrastLimits:
             log.error(
                 f"Unknown stretch_mode: '{stretch_mode}' during limit calculation. Using 'max'."
             )
-            limits = _get_max_limits(data) # Fallback uses _get_base_stats
+            limits = _get_max_limits(data)  # Fallback uses _get_base_stats
 
         return limits
 
@@ -228,12 +246,16 @@ def calculate_limits_only(img: np.ndarray, stretch_mode: str) -> ContrastLimits:
             exc_info=True,
         )
         try:
-             # Fallback to simple min/max of original image
-             all_data = img.flatten()
-             limits = _get_max_limits(all_data) # Use helper to get consistent defaults
+            # Fallback to simple min/max of original image
+            all_data = img.flatten()
+            limits = _get_max_limits(all_data)  # Use helper to get consistent defaults
         except Exception as fallback_e:
-             log.error(f"Error during fallback limit calculation: {fallback_e}. Returning zero limits.")
-             limits = ContrastLimits(p_low=0.0, p_high=0.0, actual_min=0.0, actual_max=0.0)
+            log.error(
+                f"Error during fallback limit calculation: {fallback_e}. Returning zero limits."
+            )
+            limits = ContrastLimits(
+                p_low=0.0, p_high=0.0, actual_min=0.0, actual_max=0.0
+            )
         return limits
 
 
@@ -271,10 +293,10 @@ def apply_autocontrast_8bit(
             limits = calculate_limits_only(img, stretch_mode)
             actual_stretch_mode = stretch_mode
             log.debug(
-                 f"Using calculated limits for mode '{stretch_mode}': ({limits.p_low:.2f}, {limits.p_high:.2f})"
+                f"Using calculated limits for mode '{stretch_mode}': ({limits.p_low:.2f}, {limits.p_high:.2f})"
             )
             if stretch_mode not in LIMIT_CALCULATORS:
-                 actual_stretch_mode = "max (fallback)"
+                actual_stretch_mode = "max (fallback)"
 
         # --- Validate bounds and Apply Scaling ---
         p_low = limits.p_low
@@ -294,9 +316,9 @@ def apply_autocontrast_8bit(
         denominator = p_high - p_low
         # Avoid division by zero just in case, though p_high <= p_low check should prevent it
         if denominator == 0:
-             log.warning("Scaling denominator is zero after checks, clipping sharply.")
-             scaled_uint8 = np.where(img <= p_low, 0, 255).astype(np.uint8)
-             return scaled_uint8, limits
+            log.warning("Scaling denominator is zero after checks, clipping sharply.")
+            scaled_uint8 = np.where(img <= p_low, 0, 255).astype(np.uint8)
+            return scaled_uint8, limits
 
         scaled_float = (img_float - p_low) / denominator
         scaled_float = np.clip(scaled_float, 0.0, 1.0)
@@ -313,22 +335,27 @@ def apply_autocontrast_8bit(
             exc_info=True,
         )
         try:
-             # Fallback to simple min/max scaling of original image
-             all_data = img.flatten()
-             limits = _get_max_limits(all_data) # Use helper for consistency
-             actual_min = limits.actual_min if limits.actual_min is not None else 0.0
-             actual_max = limits.actual_max if limits.actual_max is not None else 0.0
+            # Fallback to simple min/max scaling of original image
+            all_data = img.flatten()
+            limits = _get_max_limits(all_data)  # Use helper for consistency
+            actual_min = limits.actual_min if limits.actual_min is not None else 0.0
+            actual_max = limits.actual_max if limits.actual_max is not None else 0.0
 
-             if actual_max > actual_min:
-                 scaled_fallback = (img.astype(np.float32) - actual_min) / (actual_max - actual_min)
-                 scaled_fallback = np.clip(scaled_fallback, 0.0, 1.0)
-                 scaled_fallback = (scaled_fallback * 255.0).astype(np.uint8)
-             else:
-                 scaled_fallback = np.zeros_like(img, dtype=np.uint8)
+            if actual_max > actual_min:
+                scaled_fallback = (img.astype(np.float32) - actual_min) / (
+                    actual_max - actual_min
+                )
+                scaled_fallback = np.clip(scaled_fallback, 0.0, 1.0)
+                scaled_fallback = (scaled_fallback * 255.0).astype(np.uint8)
+            else:
+                scaled_fallback = np.zeros_like(img, dtype=np.uint8)
         except Exception as fallback_e:
-             log.error(f"Error during fallback scaling: {fallback_e}. Returning zero image.")
-             limits = ContrastLimits(p_low=0.0, p_high=0.0, actual_min=0.0, actual_max=0.0)
-             scaled_fallback = np.zeros_like(img, dtype=np.uint8)
+            log.error(
+                f"Error during fallback scaling: {fallback_e}. Returning zero image."
+            )
+            limits = ContrastLimits(
+                p_low=0.0, p_high=0.0, actual_min=0.0, actual_max=0.0
+            )
+            scaled_fallback = np.zeros_like(img, dtype=np.uint8)
 
         return scaled_fallback, limits
-

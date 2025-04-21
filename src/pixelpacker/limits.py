@@ -9,7 +9,10 @@ import numpy as np
 from tqdm import tqdm
 
 # Import necessary I/O, stretch functions, and config/task definitions
-from .data_models import PreprocessingConfig, ProcessingTask  # Import shared dataclasses
+from .data_models import (
+    PreprocessingConfig,
+    ProcessingTask,
+)  # Import shared dataclasses
 from .io_utils import extract_original_volume
 from .stretch import ContrastLimits, calculate_limits_only
 from .utils import log, get_executor
@@ -69,8 +72,8 @@ def _task_calculate_limits(
 
         if original_volume.ndim != 3:
             log.warning(
-                 f"Pass 1 - Expected 3D volume, got shape {original_volume.shape}"
-                 f" for T:{task.time_id} C:{ch_entry['channel']}. Skipping."
+                f"Pass 1 - Expected 3D volume, got shape {original_volume.shape}"
+                f" for T:{task.time_id} C:{ch_entry['channel']}. Skipping."
             )
             return None
 
@@ -86,12 +89,12 @@ def _task_calculate_limits(
         # Validate the clamped range before slicing
         if (
             clamped_z_start > clamped_z_end  # Range is inverted
-            or clamped_z_start >= original_depth # Start is out of bounds
-            or clamped_z_end < 0 # End is out of bounds (less likely but safe)
+            or clamped_z_start >= original_depth  # Start is out of bounds
+            or clamped_z_end < 0  # End is out of bounds (less likely but safe)
         ):
             log.warning(
                 f"Pass 1 - Global Z range [{z_start}-{z_end}] is invalid or outside"
-                f" the bounds [0-{original_depth-1}] for T:{task.time_id}"
+                f" the bounds [0-{original_depth - 1}] for T:{task.time_id}"
                 f" C:{ch_entry['channel']}. Skipping."
             )
             # Explicitly delete original volume before returning
@@ -114,12 +117,10 @@ def _task_calculate_limits(
                 f" C:{ch_entry['channel']} (Z-range [{clamped_z_start}-{clamped_z_end}])."
                 " Skipping."
             )
-            return None # Do not return a result with an empty volume
+            return None  # Do not return a result with an empty volume
 
         # Calculate contrast limits on the *cropped* volume
-        limits = calculate_limits_only(
-            globally_cropped_volume, config.stretch_mode
-        )
+        limits = calculate_limits_only(globally_cropped_volume, config.stretch_mode)
         log.debug(
             f"Pass 1 - Calculated limits {limits} for T:{task.time_id}"
             f" C:{ch_entry['channel']}"
@@ -213,8 +214,8 @@ def calculate_global_limits(
                     else:
                         # Task failed or returned None / empty volume
                         log.warning(
-                             f"Pass 1 - Task failed or produced no valid result for T:{task.time_id}"
-                             f" C:{task.channel_entry['channel']}"
+                            f"Pass 1 - Task failed or produced no valid result for T:{task.time_id}"
+                            f" C:{task.channel_entry['channel']}"
                         )
                         error_tasks += 1
                 except Exception as exc:
@@ -249,7 +250,7 @@ def calculate_global_limits(
 
             # If range was [0, 0] and became [0, 1e-6], warn about tiny range
             if final_low == 0 and final_high == 1e-6:
-                 log.warning(
+                log.warning(
                     f"Pass 1 - Adjusted C:{ch_id} global range is very small"
                     f" [{final_low:.2g}, {final_high:.2g}]."
                     " This might indicate constant image data."
@@ -269,7 +270,7 @@ def calculate_global_limits(
         # Raise an error if *no* files could be processed in Pass 1
         # This prevents proceeding to Pass 2 with no data.
         raise ValueError(
-             "Pass 1 failed critically: No contrast limits could be calculated for any input files."
+            "Pass 1 failed critically: No contrast limits could be calculated for any input files."
         )
 
     log.info(

@@ -76,11 +76,10 @@ def _task_process_channel(
             # Use the per-image limits calculated in Pass 1
             final_limits = pass1_result.limits
             if config.use_global_contrast and not global_contrast_override:
-                 log.warning(
-                     f"Pass 2 - Global contrast requested but no override value found"
-                     f" for C:{channel}. Falling back to per-image limits for T:{time_id}."
-                 )
-
+                log.warning(
+                    f"Pass 2 - Global contrast requested but no override value found"
+                    f" for C:{channel}. Falling back to per-image limits for T:{time_id}."
+                )
 
         # Call the core processing function (from io_utils)
         result_dict = process_channel(
@@ -93,7 +92,7 @@ def _task_process_channel(
             stretch_mode=config.stretch_mode,
             dry_run=config.dry_run,
             debug=config.debug,
-            output_folder=str(config.output_folder), # Ensure output path is string
+            output_folder=str(config.output_folder),  # Ensure output path is string
         )
 
         # Check if processing was successful
@@ -127,9 +126,9 @@ def _task_process_channel(
     finally:
         # VERY IMPORTANT: Clean up the large volume data from the Pass 1 result
         # after this task is done with it. This prevents memory ballooning.
-        if hasattr(pass1_result, 'globally_cropped_volume'):
-             del pass1_result.globally_cropped_volume
-             pass1_result.globally_cropped_volume = None
+        if hasattr(pass1_result, "globally_cropped_volume"):
+            del pass1_result.globally_cropped_volume
+            pass1_result.globally_cropped_volume = None
 
 
 def execute_processing_pass(
@@ -226,6 +225,8 @@ def execute_processing_pass(
         f" Errors/Skipped: {error_count}"
     )
     if processed_count == 0 and num_tasks > 0:
-         log.error("❌ Pass 2 critical failure: No channels were successfully processed.")
+        log.error(
+            "❌ Pass 2 critical failure: No channels were successfully processed."
+        )
 
     return final_results, error_count

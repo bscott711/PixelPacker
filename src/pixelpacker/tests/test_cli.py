@@ -29,7 +29,7 @@ def test_cli_help(runner: CliRunner):
     """Test the --help flag."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "Usage: main" in result.stdout # Typer uses main for the command name
+    assert "Usage: main" in result.stdout  # Typer uses main for the command name
     assert "--input" in result.stdout
     assert "--output" in result.stdout
     assert "--config" in result.stdout
@@ -41,7 +41,6 @@ def test_cli_missing_required_args(runner: CliRunner, tmp_path):
     # Missing --output
     result = runner.invoke(app, ["--input", str(tmp_path)])
     assert result.exit_code != 0
-    
 
     # Missing --input
     result = runner.invoke(app, ["--output", str(tmp_path)])
@@ -54,29 +53,33 @@ def test_cli_invalid_input_path(runner: CliRunner, tmp_path):
     output_path = tmp_path / "output"
     output_path.mkdir()
     input_path = tmp_path / "nonexistent_input"
-    result = runner.invoke(app, ["--input", str(input_path), "--output", str(output_path)])
+    result = runner.invoke(
+        app, ["--input", str(input_path), "--output", str(output_path)]
+    )
     assert result.exit_code != 0
 
 
 # --- Tests for config file loading ---
 
+
 @pytest.fixture
 def sample_config_yaml(tmp_path: Path) -> Path:
     config_data = {
         "input_folder": "/path/from/yaml",
-        "output_folder": str(tmp_path / "output_yaml"), # Use tmp_path for validity
+        "output_folder": str(tmp_path / "output_yaml"),  # Use tmp_path for validity
         "stretch_mode": "max",
         "max_threads": 4,
         "debug": True,
         "executor_type": "thread",
         "z_crop_method": "threshold",
         "z_crop_threshold": 15,
-        "use_global_contrast": False # Corresponds to --per-image-contrast
+        "use_global_contrast": False,  # Corresponds to --per-image-contrast
     }
     config_path = tmp_path / "config.yaml"
     with open(config_path, "w") as f:
         yaml.dump(config_data, f)
     return config_path
+
 
 @pytest.fixture
 def sample_config_json(tmp_path: Path) -> Path:
@@ -144,6 +147,7 @@ def test_load_config_unsupported_extension(tmp_path):
 
 # --- Tests for CLI arguments overriding config files ---
 
+
 @pytest.mark.cli
 def test_cli_overrides_config(runner: CliRunner, sample_config_yaml, tmp_path, mocker):
     """Test that CLI arguments take precedence over config file settings."""
@@ -158,12 +162,17 @@ def test_cli_overrides_config(runner: CliRunner, sample_config_yaml, tmp_path, m
     result = runner.invoke(
         app,
         [
-            "--config", str(sample_config_yaml),
-            "--input", str(input_dir), # Provide required input via CLI
-            "--output", str(output_dir_cli), # Override output from YAML
-            "--stretch", "smart",        # Override stretch_mode from YAML ("max")
-            "--threads", "6",            # Override max_threads from YAML (4)
-            "--global-contrast",         # Override use_global_contrast from YAML (False)
+            "--config",
+            str(sample_config_yaml),
+            "--input",
+            str(input_dir),  # Provide required input via CLI
+            "--output",
+            str(output_dir_cli),  # Override output from YAML
+            "--stretch",
+            "smart",  # Override stretch_mode from YAML ("max")
+            "--threads",
+            "6",  # Override max_threads from YAML (4)
+            "--global-contrast",  # Override use_global_contrast from YAML (False)
         ],
     )
 
@@ -180,9 +189,9 @@ def test_cli_overrides_config(runner: CliRunner, sample_config_yaml, tmp_path, m
     assert final_config.output_folder == output_dir_cli.resolve()
     assert final_config.stretch_mode == "smart"
     assert final_config.max_threads == 6
-    assert final_config.use_global_contrast is True # Set by --global-contrast flag
-    assert final_config.debug is True # This came from the YAML and wasn't overridden
-    assert final_config.executor_type == "thread" # From YAML, not overridden
+    assert final_config.use_global_contrast is True  # Set by --global-contrast flag
+    assert final_config.debug is True  # This came from the YAML and wasn't overridden
+    assert final_config.executor_type == "thread"  # From YAML, not overridden
 
 
 @pytest.mark.cli
@@ -191,7 +200,7 @@ def test_cli_bool_flags(runner: CliRunner, tmp_path, mocker):
     input_dir = tmp_path / "input_flags"
     output_dir = tmp_path / "output_flags"
     input_dir.mkdir()
-    output_dir.mkdir() # Create dir
+    output_dir.mkdir()  # Create dir
 
     mock_run = mocker.patch("pixelpacker.cli.run_preprocessing")
 
@@ -205,13 +214,18 @@ def test_cli_bool_flags(runner: CliRunner, tmp_path, mocker):
     mock_run.reset_mock()
 
     # Test enabling flags
-    runner.invoke(app, [
-        "--input", str(input_dir),
-        "--output", str(output_dir),
-        "--debug",
-        "--dry-run",
-        "--per-image-contrast", # Sets use_global_contrast to False
-    ])
+    runner.invoke(
+        app,
+        [
+            "--input",
+            str(input_dir),
+            "--output",
+            str(output_dir),
+            "--debug",
+            "--dry-run",
+            "--per-image-contrast",  # Sets use_global_contrast to False
+        ],
+    )
     mock_run.assert_called_once()
     config = mock_run.call_args.kwargs.get("config")
     assert config.debug is True
