@@ -64,6 +64,8 @@ build-backend = "setuptools.build_meta"
 
 [dependency-groups]
 dev = [
+    "pixelpacker[test]",
+    "pre-commit>=3.0",
     "build>=1.2.2.post1",
     "twine>=6.1.0",
 ]

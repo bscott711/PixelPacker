@@ -1,0 +1,11 @@
+# .pre-commit-config.yaml
+repos:
+- repo: local
+  hooks:
+  - id: pytest-fast
+    name: Run fast pytest suite (no integration)
+    entry: pytest -m "not integration" -n auto src/pixelpacker/tests/
+    language: system
+    types: [python]
+    pass_filenames: false # Don't pass specific filenames, run whole suite
+    always_run: true     # Run on every commit attempt
