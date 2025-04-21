@@ -66,6 +66,7 @@ markers = [
     "integration: mark test as an integration test (slower, end-to-end)",
     "cli: mark test as a CLI test (requires command line interface)",
     "mock: mark test as a mock test (uses mocking)",
+    "quick: mark test as a quick test (fast, minimal setup)",
 ]
 
 [build-system]

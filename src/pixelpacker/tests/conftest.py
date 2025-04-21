@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 # Disable excessive logging from tifffile/PIL during tests
 logging.getLogger("tifffile").setLevel(logging.ERROR)
 logging.getLogger("PIL").setLevel(logging.WARNING)
+logging.getLogger("matplotlib").setLevel(logging.INFO)
 
 
 @pytest.fixture(scope="function")
