@@ -3,18 +3,19 @@
 import enum
 import json
 import logging
+import typing
 from pathlib import Path
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional, Union
 
 import typer
+import click
 import yaml
 from typing_extensions import Annotated
 
 # --- Core Imports ---
+from . import __version__
 from .core import run_preprocessing
 from .data_models import PreprocessingConfig
-from . import __version__
-
 
 log = logging.getLogger(__name__)
 app = typer.Typer(
@@ -66,9 +67,16 @@ def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
     except (yaml.YAMLError, json.JSONDecodeError) as e:
         log.error(f"Error parsing configuration file {config_path}: {e}")
         raise ValueError(f"Invalid format in config file {config_path}.") from e
+    except ValueError as e:
+        log.error(f"Configuration value error in {config_path}: {e}")
+        raise
     except Exception as e:
-        log.error(f"Unexpected error loading config file {config_path}: {e}")
-        raise ValueError(f"Unexpected error loading config file {config_path}.") from e
+        log.error(
+            f"Unexpected error loading config file {config_path}: {e}", exc_info=True
+        )
+        raise RuntimeError(
+            f"Unexpected error loading config file {config_path}."
+        ) from e
 
 
 def version_callback(value: bool):
@@ -79,9 +87,8 @@ def version_callback(value: bool):
 
 
 @app.command()
-def main(
+def main(  # noqa: PLR0913
     ctx: typer.Context,
-    # --- Options MUST have defaults defined here accurately ---
     input_folder: Annotated[
         Optional[Path],
         typer.Option(
@@ -94,7 +101,7 @@ def main(
             readable=True,
             resolve_path=True,
         ),
-    ] = None,  # Required, no default path makes sense
+    ] = None,
     output_folder: Annotated[
         Optional[Path],
         typer.Option(
@@ -103,10 +110,9 @@ def main(
             help="Output folder for WebP volumes and manifest.",
             file_okay=False,
             dir_okay=True,
-            # Writable check happens later after potentially creating dir
             resolve_path=True,
         ),
-    ] = None,  # Required, no default path makes sense
+    ] = None,
     config_file: Annotated[
         Optional[Path],
         typer.Option(
@@ -122,7 +128,7 @@ def main(
     ] = None,
     input_pattern: Annotated[
         str, typer.Option("--input-pattern", help="Glob pattern for input TIFFs.")
-    ] = "*_ch*_stack*.tif*",  # Default
+    ] = "*_ch*_stack*.tif*",
     stretch_mode: Annotated[
         str,
         typer.Option(
@@ -130,7 +136,7 @@ def main(
             "-s",
             help="Contrast stretch mode (smart, max, imagej-auto, smart-late).",
         ),
-    ] = "smart",  # Default
+    ] = "smart",
     z_crop_method: Annotated[
         ZCropMethod,
         typer.Option(
@@ -138,7 +144,7 @@ def main(
             case_sensitive=False,
             help="Method for automatic Z-cropping.",
         ),
-    ] = ZCropMethod.slope,  # Default
+    ] = ZCropMethod.slope,
     z_crop_threshold: Annotated[
         int,
         typer.Option(
@@ -146,7 +152,7 @@ def main(
             min=0,
             help="Intensity threshold for 'threshold' Z-crop method.",
         ),
-    ] = 0,  # Default
+    ] = 0,
     per_image_contrast: Annotated[
         bool,
         typer.Option(
@@ -156,7 +162,7 @@ def main(
                 "global limits across timepoints (--global-contrast)."
             ),
         ),
-    ] = False,  # Default: --global-contrast is implicitly True
+    ] = False,
     executor: Annotated[
         ExecutorChoice,
         typer.Option(
@@ -164,19 +170,33 @@ def main(
             case_sensitive=False,
             help="Concurrency execution model ('thread' or 'process').",
         ),
-    ] = ExecutorChoice.process,  # Default
+    ] = ExecutorChoice.process,
     threads: Annotated[
-        int, typer.Option("--threads", "-t", min=1, help="Number of worker threads or processes.")
-    ] = 8,  # Default
+        int,
+        typer.Option(
+            "--threads", "-t", min=1, help="Number of worker threads or processes."
+        ),
+    ] = 8,
     dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="Simulate processing without reading/writing image files.")
-    ] = False,  # Default
+        bool,
+        typer.Option(
+            "--dry-run", help="Simulate processing without reading/writing image files."
+        ),
+    ] = False,
     debug: Annotated[
-        bool, typer.Option("--debug", help="Enable debug logging and save intermediate files.")
-    ] = False,  # Default
+        bool,
+        typer.Option(
+            "--debug", help="Enable debug logging and save intermediate files."
+        ),
+    ] = False,
     version: Annotated[
         Optional[bool],
-        typer.Option("--version", callback=version_callback, is_eager=True, help="Show version and exit."),
+        typer.Option(
+            "--version",
+            callback=version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
     ] = None,
 ):
     """Main command function: Loads config, merges args, runs preprocessing."""
@@ -189,26 +209,11 @@ def main(
     )
     log.info("🚀 Starting PixelPacker Preprocessing Pipeline...")
 
-    # --- Configuration Loading and Merging ---
-    config_dict: Dict[str, Any] = {}  # Initialize empty dict
+    # --- Configuration Loading and Merging (Typer Defaults -> File -> CLI final) ---
+    config_dict: Dict[str, Any] = {}
     try:
-        # 1. Define Typer Option Defaults FIRST
-        typer_option_defaults = {
-            "input_folder": None,
-            "output_folder": None,
-            "input_pattern": "*_ch*_stack*.tif*",
-            "stretch_mode": "smart",
-            "z_crop_method": ZCropMethod.slope.value,
-            "z_crop_threshold": 0,
-            "per_image_contrast": False,
-            "executor": ExecutorChoice.process.value,
-            "threads": 8,
-            "dry_run": False,
-            "debug": False,
-        }
-        log.debug(f"Initial defaults from Typer options: {typer_option_defaults}")
-
-        # Map CLI param names to PreprocessingConfig field names
+        # 1. Initialize with Typer Defaults mapped to config keys
+        typer_param_defs = {p.name: p for p in ctx.command.params}
         param_to_config_map = {
             "input_folder": "input_folder",
             "output_folder": "output_folder",
@@ -216,176 +221,206 @@ def main(
             "stretch_mode": "stretch_mode",
             "z_crop_method": "z_crop_method",
             "z_crop_threshold": "z_crop_threshold",
-            "per_image_contrast": "use_global_contrast",
+            "per_image_contrast": "use_global_contrast",  # Maps to inverted logic
             "executor": "executor_type",
             "threads": "max_threads",
             "dry_run": "dry_run",
             "debug": "debug",
         }
 
-        # 2. Start building config_dict using Typer defaults mapped to config keys
-        for param_name, default_value in typer_option_defaults.items():
-            config_key = param_to_config_map.get(param_name)
-            if config_key:
-                if param_name == "per_image_contrast":
-                    config_dict["use_global_contrast"] = not default_value
-                else:
-                    config_dict[config_key] = default_value
+        for param_name, param_def in typer_param_defs.items():
+            potential_config_key = param_to_config_map.get(param_name) if param_name is not None else None
+            if potential_config_key is None:
+                continue
 
-        log.debug(f"Config dict after applying Typer defaults: {config_dict}")
+            # Assign to the final variable name, now known to be str
+            config_key: str = potential_config_key
 
-        # 3. Load Config File -> Overrides Typer Defaults
+            default_value = param_def.default
+            processed_default: Any = default_value
+
+            if isinstance(default_value, enum.Enum):
+                processed_default = default_value.value
+            # Handle Path conversion for Optional[Path] defaults if they are not None
+            elif isinstance(default_value, Path):
+                processed_default = default_value.resolve()
+            # Note: Optional[Path] default is None, handled implicitly
+
+            if param_name == "per_image_contrast":
+                config_dict["use_global_contrast"] = not processed_default
+            else:
+                config_dict[config_key] = processed_default
+
+        log.debug(f"Config dict initialized with Typer defaults: {config_dict}")
+
+        # 2. Load Config File -> Overrides Defaults
+        file_values = {}
         if config_file:
             file_values = _load_config_from_file(config_file)
             log.debug(f"Raw values loaded from file: {file_values}")
             for key, value in file_values.items():
                 if key in PreprocessingConfig.__dataclass_fields__:
                     try:
-                        if key in ["input_folder", "output_folder"] and isinstance(value, str):
-                            config_dict[key] = Path(value)
+                        if key in ["input_folder", "output_folder"] and isinstance(
+                            value, str
+                        ):
+                            config_dict[key] = Path(value).resolve()
                         elif key == "z_crop_threshold" and value is not None:
                             config_dict[key] = int(value)
                         elif key == "max_threads" and value is not None:
                             config_dict[key] = int(value)
-                        elif key in ["use_global_contrast", "dry_run", "debug"] and value is not None:
+                        elif key in [
+                            "use_global_contrast",
+                            "dry_run",
+                            "debug",
+                        ] and value is not None:
                             config_dict[key] = bool(value)
                         elif key == "z_crop_method" and isinstance(value, str):
                             config_dict[key] = ZCropMethod(value).value
                         elif key == "executor_type" and isinstance(value, str):
-                            config_dict["executor_type"] = ExecutorChoice(value).value
-                        else:
+                            config_dict[key] = ExecutorChoice(value).value
+                        elif value is not None:
                             config_dict[key] = value
+                        else:
+                            log.debug(
+                                f"Ignoring null value for '{key}' in config file."
+                            )
                     except (ValueError, TypeError, KeyError) as e:
                         log.warning(
-                            f"Could not convert config file value for '{key}': {value} - {e}. "
-                            "Using default or previously set value."
+                            f"Could not convert config file value for '{key}':"
+                            f" {value} - {e}."
                         )
-                elif key == "executor" and "executor_type" not in config_dict:
+                elif key == "executor" and "executor_type" not in file_values:
                     try:
-                        config_dict["executor_type"] = ExecutorChoice(value).value
+                        if isinstance(value, str):
+                            config_dict["executor_type"] = ExecutorChoice(value).value
+                            log.warning(
+                                "Using deprecated config key 'executor'."
+                                " Mapped to 'executor_type'."
+                            )
+                        else:
+                            raise TypeError("Value for 'executor' must be a string.")
                     except (ValueError, TypeError, KeyError) as e:
                         log.warning(
-                            f"Could not convert config file value for deprecated key 'executor': {value} - {e}."
+                            f"Could not convert deprecated 'executor': {value} - {e}."
                         )
                 else:
-                    log.warning(f"Ignoring unknown or already handled key '{key}' from config file.")
+                    log.warning(f"Ignoring unknown key '{key}' from config file.")
 
             log.debug(f"Config dict after applying file values: {config_dict}")
         else:
             log.debug("No configuration file provided.")
 
-        # 4. Apply CLI Arguments IF they differ from Typer defaults (as overrides)
-        cli_overrides = {}
+         # 3. CLI overrides
+        cli_applied_values: Dict[str, Any] = {}
         for param_name, cli_arg_value in ctx.params.items():
-            if param_name not in typer_option_defaults:
+            if param_name == "config_file":
                 continue
 
-            typer_default = typer_option_defaults.get(param_name)
+            # map param to config key, with a temporary var to help Pylance narrow types
+            temp_key = param_to_config_map.get(param_name)
+            if temp_key is None:
+                continue
+            config_key: str = temp_key
 
-            # Process value before comparison (resolve Paths, get Enum value)
-            processed_cli_value: Any
-            if isinstance(cli_arg_value, Path):
-                processed_cli_value = cli_arg_value.resolve()
-                # If default is None, any path is different
-                is_different = processed_cli_value is not None
-            elif isinstance(cli_arg_value, enum.Enum):
-                processed_cli_value = cli_arg_value.value
-                is_different = processed_cli_value != typer_default
-            else:
-                processed_cli_value = cli_arg_value
-                is_different = processed_cli_value != typer_default
+            # only override if the user actually passed this on the CLI
+            source = ctx.get_parameter_source(param_name)
+            if source is not click.core.ParameterSource.COMMANDLINE:
+                log.debug(f"Skipping '{param_name}': not provided via CLI (source={source})")
+                continue
 
-            if is_different:
-                config_key = param_to_config_map.get(param_name)
-                if not config_key:
-                    continue
+            # special per-image-contrast handling
+            if param_name == "per_image_contrast":
+                processed = not cli_arg_value
+                if config_dict.get("use_global_contrast") != processed:
+                    config_dict["use_global_contrast"] = processed
+                    cli_applied_values["use_global_contrast"] = processed
+                continue
 
-                # Handle the boolean flag inversion
-                if param_name == "per_image_contrast":
-                    config_dict["use_global_contrast"] = not cli_arg_value
-                    cli_overrides["use_global_contrast"] = not cli_arg_value
-                    log.debug(
-                        f"CLI override: {param_name}={cli_arg_value} -> "
-                        f"use_global_contrast={config_dict['use_global_contrast']}"
-                    )
+            # now your existing enum/Path/int/bool conversion logic:
+            try:
+                field = PreprocessingConfig.__dataclass_fields__[config_key].type
+                origin = typing.get_origin(field)
+                args = typing.get_args(field)
+                is_opt = origin is Union and type(None) in args
+                is_path = field is Path or (is_opt and Path in args)
+
+                if isinstance(cli_arg_value, enum.Enum):
+                    final = cli_arg_value.value
+                elif is_path:
+                    final = None if cli_arg_value is None else Path(cli_arg_value).resolve()
+                elif field is int and cli_arg_value is not None:
+                    final = int(cli_arg_value)
+                elif field is bool and cli_arg_value is not None:
+                    final = bool(cli_arg_value)
+                elif is_opt and cli_arg_value is None:
+                    final = None
                 else:
-                    # Apply type conversion based on dataclass annotation and store override
-                    try:
-                        final_typed_value: Any
-                        field_type = PreprocessingConfig.__dataclass_fields__[config_key].type
+                    final = cli_arg_value
+            except Exception as e:
+                log.error(f"Invalid CLI value for {param_name}: {e}")
+                raise
 
-                        # Handle Optional Paths and regular Paths
-                        is_optional_path = str(field_type).startswith("typing.Optional[pathlib.Path") or \
-                                           str(field_type).startswith("Optional[Path")
-                        is_path = field_type is Path
+            if config_dict.get(config_key) != final:
+                config_dict[config_key] = final
+                cli_applied_values[config_key] = final
 
-                        if is_optional_path:
-                            # Pass str or Path to Path()
-                            if isinstance(processed_cli_value, (str, Path)):
-                                final_typed_value = Path(processed_cli_value).resolve()
-                            elif processed_cli_value is None:
-                                final_typed_value = None
-                            else:
-                                raise TypeError(f"Expected str or Path for Optional[Path], got {type(processed_cli_value)}")
-                        elif is_path:
-                             # Pass str or Path to Path()
-                            if isinstance(processed_cli_value, (str, Path)):
-                                final_typed_value = Path(processed_cli_value).resolve()
-                            else:
-                                # Should be caught by required check later if None
-                                raise TypeError(f"Expected str or Path for Path, got {type(processed_cli_value)}")
-                        elif field_type is int:
-                            # Pass int-convertible to int()
-                            final_typed_value = int(processed_cli_value)
-                        elif field_type is bool:
-                             # Pass bool-convertible to bool()
-                            final_typed_value = bool(processed_cli_value)
-                        else:
-                            # Assume other types (str, already converted Enum values) are directly assignable
-                            final_typed_value = processed_cli_value
+        if cli_applied_values:
+            log.info("Applied CLI overrides: %s", cli_applied_values)
 
-                        # Apply the override
-                        config_dict[config_key] = final_typed_value
-                        cli_overrides[config_key] = final_typed_value
-                        log.debug(f"CLI override: {param_name}={cli_arg_value} -> {config_key}={final_typed_value}")
 
-                    except (ValueError, TypeError) as e:
-                        log.error(
-                            f"Invalid value/type for explicitly set CLI argument {param_name}: "
-                            f"'{processed_cli_value}' (from '{cli_arg_value}') - {e}"
-                        )
-                        raise ValueError(f"Invalid CLI value for {param_name}: {e}") from e
+        # 4. Final Validation and Instantiation
+        input_val = config_dict.get("input_folder")
+        output_val = config_dict.get("output_folder")
 
-        if cli_overrides:
-            log.info(f"Applying explicitly set CLI values (overriding file/defaults): {cli_overrides}")
-        else:
-            log.debug("No explicit CLI arguments provided to override defaults/file.")
+        # Ensure required paths are set if they are not Optional in the dataclass
+        # (Typer handles existence check for CLI, but file/defaults might miss it)
+        if not input_val:
+            raise ValueError("Input folder is required.")
+        if not output_val:
+            raise ValueError("Output folder is required.")
 
-        # --- Final Validation and Instantiation ---
-        # Ensure required paths are set AFTER merging everything
-        if not isinstance(config_dict.get("input_folder"), Path):
-            if config_dict.get("input_folder") is None:
-                raise ValueError("Input folder must be provided via --input or config file.")
-            else:
-                raise TypeError(f"Input folder must be a valid path, got: {config_dict.get('input_folder')}")
+        # Type checks remain useful defense
+        if not isinstance(input_val, Path):
+             raise TypeError(f"Input folder must be a valid path, got: {input_val}")
+        if not isinstance(output_val, Path):
+             raise TypeError(f"Output folder must be a valid path, got: {output_val}")
 
-        if not isinstance(config_dict.get("output_folder"), Path):
-            if config_dict.get("output_folder") is None:
-                raise ValueError("Output folder must be provided via --output or config file.")
-            else:
-                raise TypeError(f"Output folder must be a valid path, got: {config_dict.get('output_folder')}")
-
-        # Ensure output dir exists
-        output_dir_path = cast(Path, config_dict["output_folder"])
+        # Ensure output directory exists and is writable
+        output_dir_path = output_val
         try:
             output_dir_path.mkdir(parents=True, exist_ok=True)
-            log.info(f"Ensured output directory exists: {output_dir_path}")
+            dummy_file = output_dir_path / ".pixelpacker_write_test"
+            dummy_file.touch()
+            dummy_file.unlink()
+            log.info(
+                f"Ensured output directory exists and is writable: {output_dir_path}"
+            )
         except OSError as e:
-            log.error(f"Failed to create output directory {output_dir_path}: {e}")
-            raise
+            log.error(
+                f"Failed to create or write to output directory {output_dir_path}: {e}"
+            )
+            raise PermissionError(
+                f"Cannot write to output directory: {output_dir_path}"
+            ) from e
 
         # 5. Create final PreprocessingConfig object
-        final_config = PreprocessingConfig(**config_dict)
+        valid_keys = PreprocessingConfig.__dataclass_fields__.keys()
+        final_config_data = {
+            k: v for k, v in config_dict.items() if k in valid_keys
+        }
+
+        try:
+             final_config = PreprocessingConfig(**final_config_data)
+        except TypeError as e:
+             log.error(
+                 "Configuration Error: Missing or incorrect arguments for"
+                 f" PreprocessingConfig: {e}"
+             )
+             raise ValueError(
+                 f"Missing/incorrect configuration arguments. Details: {e}"
+             ) from e
+
         log.info("Preprocessing configuration merged successfully.")
         log.debug(f"Final configuration: {final_config}")
 
@@ -397,20 +432,33 @@ def main(
             log_format = "%(levelname)s: [%(name)s] %(message)s"
             date_format = None
             if final_config.debug:
-                log_format = "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"
+                log_format = (
+                    "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"
+                )
                 date_format = "%H:%M:%S"
-            # Use force=True to ensure handler updates
-            logging.basicConfig(level=final_log_level, format=log_format, datefmt=date_format, force=True)
-
+            # Use force=True to reconfigure the root logger
+            logging.basicConfig(
+                level=final_log_level,
+                format=log_format,
+                datefmt=date_format,
+                force=True,
+            )
             log.info(
-                f"Log level updated to {'DEBUG' if final_config.debug else 'INFO'} based on final config."
+                f"Log level updated to {'DEBUG' if final_config.debug else 'INFO'}."
             )
             if final_config.debug:
                 log.debug(f"Final configuration (re-logged for debug): {final_config}")
 
-    except (ValueError, TypeError, FileNotFoundError, KeyError) as e:
-        log.error(f"❌ Configuration Error: {e}")
-        if config_dict.get("debug", initial_cli_debug_value):
+    except (
+        ValueError,
+        TypeError,
+        FileNotFoundError,
+        KeyError,
+        PermissionError,
+    ) as e:
+        # Fix: Use standard logging format, remove f-string
+        log.error("❌ Configuration Error: %s", e)
+        if initial_cli_debug_value: # Log state only if debug was *initially* requested
             log.debug(f"Problematic config_dict state during error: {config_dict}")
         raise typer.Exit(code=1)
     except Exception as e:

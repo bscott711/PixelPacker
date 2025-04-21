@@ -35,21 +35,22 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "pytest>=7.0",        # Add pytest with a reasonable minimum version
-    "pytest-html>=4.0",    # Add pytest-html for HTML reports
-    "pytest-xdist>=3.0",   # Add pytest-xdist for parallel test execution
-    "pytest-cov>=3.0",      # Add pytest-cov for coverage reporting
+    "pytest>=7.0", # Add pytest with a reasonable minimum version
+    "pytest-html>=4.0", # Add pytest-html for HTML reports
+    "pytest-xdist>=3.0", # Add pytest-xdist for parallel test execution
+    "pytest-cov>=3.0", # Add pytest-cov for coverage reporting
+    "pytest-mock>=3.10", # Add pytest-mock for mocking
 ]
 
 [tool.pytest.ini_options]
 markers = [
     "unit: mark test as a unit test (fast, isolated)",
     "integration: mark test as an integration test (slower, end-to-end)",
+    "cli: mark test as a CLI test (requires command line interface)",
 ]
 
 [project.scripts]
-# UPDATE this line to point to the Typer app instance:
-pixelpacker = "pixelpacker.cli:app" # Change from cli:main to cli:app
+pixelpacker = "pixelpacker.cli:app"
 
 [project.urls]
 "Homepage" = "https://github.com/bscott711/PixelPacker"
@@ -64,4 +65,11 @@ build-backend = "setuptools.build_meta"
 dev = [
     "build>=1.2.2.post1",
     "twine>=6.1.0",
+]
+test = [
+    "pytest>=7.0",
+    "pytest-html>=4.0",
+    "pytest-xdist>=3.0",
+    "pytest-cov>=3.0",
+    "pytest-mock>=3.10",
 ]
