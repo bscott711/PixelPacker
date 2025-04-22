@@ -1,4 +1,4 @@
-![Banner](Banner.png)
+![Banner](https://raw.githubusercontent.com/bscott711/PixelPacker/main/Banner.png)
 ---
 
 [![PixelPacker CI](https://github.com/bscott711/PixelPacker/actions/workflows/ci.yml/badge.svg)](https://github.com/bscott711/PixelPacker/actions/workflows/ci.yml)
