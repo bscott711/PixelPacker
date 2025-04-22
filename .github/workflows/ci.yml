@@ -1,81 +1,74 @@
-# .github/workflows/release.yml
+# .github/workflows/ci.yml
 
-name: Publish Python Package to PyPI
+name: PixelPacker CI
 
+# Controls when the workflow will run
 on:
   push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+' # Trigger on tags like v1.2.3
-      - 'v[0-9]+.[0-9]+.[0-9]+rc[0-9]+' # Trigger on tags like v1.2.3rc1
-      # Add other patterns if needed (e.g., alpha, beta)
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  build-and-publish:
-    name: Build and publish Python distributions to PyPI and TestPyPI
-    runs-on: ubuntu-latest
+  lint-and-test:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest # Changed back to ubuntu based on user comment
+    strategy:
+      # Don't cancel other jobs if one fails
+      fail-fast: false
+      matrix:
+        # Test on multiple supported Python versions
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - name: Check out repository code at the tag
+      - name: Check out repository code
         uses: actions/checkout@v4
+        with:
+          lfs: false
 
-      - name: Set up Python
-        id: setup
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          # Use a specific Python version known to work for building
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
+      # Install uv (needed for the uv commands below)
       - name: Install uv
         run: |
           python -m pip install --upgrade pip
           pip install uv
 
-      # Combined Venv Creation and Build Dependency Installation
-      - name: Create venv and Install build dependencies
+      - name: Create virtual environment (using uv)
+        run: uv venv --python ${{ matrix.python-version }}
+
+      - name: Install dependencies (using uv)
         run: |
-          # Create the virtual environment using the specific python version from the setup step
-          # Use the step id 'setup' to access its outputs
-          echo "Creating venv with Python version: ${{ steps.setup.outputs.python-version }}"
-          uv venv --python ${{ steps.setup.outputs.python-version }} # <<< Corrected reference
-          # Activate the virtual environment
           source .venv/bin/activate
-          # Install build and twine within the activated environment
-          echo "Installing build tools..."
-          uv pip install build twine
-          echo "Build tools installed."
+          # Install dev dependencies
+          uv pip install -e '.[dev]'
 
-      - name: Build source distribution and wheel
+      - name: Lint with Ruff
+        env:
+          PYTHON_VERSION_NODOT: ${{ matrix.python-version }}
         run: |
-          # Activate the environment again for this step
           source .venv/bin/activate
-          echo "Building distributions..."
-          python -m build
-          echo "Distributions built."
-          ls -l dist/ # List built files for verification
+          TARGET_VERSION_NODOT="py${PYTHON_VERSION_NODOT//./}"
+          echo "Using Ruff target version: $TARGET_VERSION_NODOT"
+          ruff check --select=E9,F63,F7,F82 --target-version=$TARGET_VERSION_NODOT .
+          ruff check --target-version=$TARGET_VERSION_NODOT . --output-format=github
+        continue-on-error: true
 
-      - name: Verify built distributions (Optional but Recommended)
+      - name: Check formatting with Ruff
+        env:
+          PYTHON_VERSION_NODOT: ${{ matrix.python-version }}
         run: |
-          # Activate the environment again for this step
           source .venv/bin/activate
-          echo "Checking distributions with twine..."
-          twine check dist/*
-          echo "Twine check complete."
+          TARGET_VERSION_NODOT="py${PYTHON_VERSION_NODOT//./}"
+          echo "Using Ruff format target version: $TARGET_VERSION_NODOT"
+          ruff format --check --target-version=$TARGET_VERSION_NODOT .
+        continue-on-error: true
 
-      - name: Publish distribution to TestPyPI
-        # Upload all releases (including RCs) to TestPyPI first
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          # Use an API token from TestPyPI, stored in GitHub secrets
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-          repository-url: https://test.pypi.org/legacy/
-          # Optionally skip existing packages on TestPyPI
-          # skip-existing: true
-
-      - name: Publish distribution to PyPI
-        # Only publish actual releases (not RCs, betas, etc.) to main PyPI
-        if: github.ref_type == 'tag' && !contains(github.ref_name, 'a') && !contains(github.ref_name, 'b') && !contains(github.ref_name, 'rc')
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          # Use an API token from PyPI, stored in GitHub secrets
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          # repository-url: https://upload.pypi.org/legacy/ # Default, not needed
+      - name: Run Non-Integration Tests with Pytest
+        run: |
+          source .venv/bin/activate
+          # --- MODIFIED: Added -m "not integration" ---
+          pytest -m "not integration" -n auto src/pixelpacker/tests/

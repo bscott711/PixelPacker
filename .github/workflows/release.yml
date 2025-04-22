@@ -12,15 +12,18 @@ on:
 jobs:
   build-and-publish:
     name: Build and publish Python distributions to PyPI and TestPyPI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # Use ubuntu as it's generally fastest/cheapest for this
 
     steps:
       - name: Check out repository code at the tag
         uses: actions/checkout@v4
+        # No LFS needed for building the package itself
 
       - name: Set up Python
+        id: setup # <<< Added id: setup
         uses: actions/setup-python@v5
         with:
+          # Use a specific Python version known to work for building
           python-version: "3.11"
 
       - name: Install uv
@@ -31,8 +34,10 @@ jobs:
       # Combined Venv Creation and Build Dependency Installation
       - name: Create venv and Install build dependencies
         run: |
-          # Create the virtual environment
-          uv venv --python ${{ steps.setup-python.outputs.python-version }}
+          # Create the virtual environment using the specific python version from the setup step
+          # Use the step id 'setup' to access its outputs
+          echo "Creating venv with Python version: ${{ steps.setup.outputs.python-version }}"
+          uv venv
           # Activate the virtual environment
           source .venv/bin/activate
           # Install build and twine within the activated environment
