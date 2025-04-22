@@ -12,39 +12,56 @@ on:
 jobs:
   build-and-publish:
     name: Build and publish Python distributions to PyPI and TestPyPI
-    runs-on: ubuntu-latest # Use ubuntu as it's generally fastest/cheapest for this
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository code at the tag
         uses: actions/checkout@v4
-        # No LFS needed for building the package itself
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # Use a specific Python version known to work for building
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Install uv
         run: |
           python -m pip install --upgrade pip
           pip install uv
 
-      - name: Install build dependencies
-        run: uv pip install build twine
+      # Combined Venv Creation and Build Dependency Installation
+      - name: Create venv and Install build dependencies
+        run: |
+          # Create the virtual environment
+          uv venv --python ${{ steps.setup-python.outputs.python-version }}
+          # Activate the virtual environment
+          source .venv/bin/activate
+          # Install build and twine within the activated environment
+          echo "Installing build tools..."
+          uv pip install build twine
+          echo "Build tools installed."
 
       - name: Build source distribution and wheel
-        run: python -m build
+        run: |
+          # Activate the environment again for this step
+          source .venv/bin/activate
+          echo "Building distributions..."
+          python -m build
+          echo "Distributions built."
+          ls -l dist/ # List built files for verification
 
       - name: Verify built distributions (Optional but Recommended)
-        run: twine check dist/*
+        run: |
+          # Activate the environment again for this step
+          source .venv/bin/activate
+          echo "Checking distributions with twine..."
+          twine check dist/*
+          echo "Twine check complete."
 
       - name: Publish distribution to TestPyPI
         # Upload all releases (including RCs) to TestPyPI first
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           # Use an API token from TestPyPI, stored in GitHub secrets
-          # IMPORTANT: Name this secret exactly 'TEST_PYPI_API_TOKEN' in GitHub repo settings
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository-url: https://test.pypi.org/legacy/
           # Optionally skip existing packages on TestPyPI
@@ -52,11 +69,9 @@ jobs:
 
       - name: Publish distribution to PyPI
         # Only publish actual releases (not RCs, betas, etc.) to main PyPI
-        # This 'if' condition checks if the tag does NOT contain letters like 'rc', 'a', 'b'
         if: github.ref_type == 'tag' && !contains(github.ref_name, 'a') && !contains(github.ref_name, 'b') && !contains(github.ref_name, 'rc')
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           # Use an API token from PyPI, stored in GitHub secrets
-          # IMPORTANT: Name this secret exactly 'PYPI_API_TOKEN' in GitHub repo settings
           password: ${{ secrets.PYPI_API_TOKEN }}
           # repository-url: https://upload.pypi.org/legacy/ # Default, not needed
