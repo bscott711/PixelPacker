@@ -1,7 +1,11 @@
 ![Banner](Banner.png)
 ---
 
-[![Python Version](https://img.shields.io/pypi/pyversions/pixelpacker)](https://pypi.org/project/pixelpacker/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PixelPacker CI](https://github.com/bscott711/PixelPacker/actions/workflows/ci.yml/badge.svg)](https://github.com/bscott711/PixelPacker/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/pixelpacker.svg)](https://pypi.org/project/pixelpacker/)
+[![Python Version](https://img.shields.io/pypi/pyversions/pixelpacker)](https://pypi.org/project/pixelpacker/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 ## Automate your 3D TIFF→WebP pipeline for fast, web‑friendly volumetric viewing.  
 ### Achieve >100X file‑size reduction (e.g. 75 MB → 750 KB).  
