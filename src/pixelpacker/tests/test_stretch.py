@@ -8,13 +8,11 @@ from pytest import approx  # For comparing floating point numbers
 from pixelpacker.stretch import (
     calculate_limits_only,
     apply_autocontrast_8bit,
-    ContrastLimits,
     compute_dynamic_cutoffs,
     # Constants used for comparison if needed, e.g.:
     PERCENTILE_1,
     PERCENTILE_LOW_IMAGEJ,
     PERCENTILE_HIGH_IMAGEJ,
-    HIST_BINS,  # Import if needed for specific assertions
 )
 
 

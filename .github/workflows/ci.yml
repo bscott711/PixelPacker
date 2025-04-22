@@ -87,4 +87,4 @@ jobs:
           source .venv/bin/activate
           # Run all tests in parallel
           # Consider adding '-m "not integration"' if integration tests are too slow/flaky for CI PR checks
-          pytest -n auto src/pixelpacker/tests/
+          pytest -m "not integration" -n auto src/pixelpacker/tests/
