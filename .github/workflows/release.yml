@@ -7,23 +7,29 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+' # Trigger on tags like v1.2.3
       - 'v[0-9]+.[0-9]+.[0-9]+rc[0-9]+' # Trigger on tags like v1.2.3rc1
-      # Add other patterns if needed (e.g., alpha, beta)
+  workflow_dispatch:
+
+permissions:
+  # Required for Trusted Publishing using OIDC
+  id-token: write
+  # Optional: Allow action to create release on GitHub
+  # contents: write
+
 
 jobs:
   build-and-publish:
     name: Build and publish Python distributions to PyPI and TestPyPI
-    runs-on: ubuntu-latest # Use ubuntu as it's generally fastest/cheapest for this
+    runs-on: ubuntu-latest
+
 
     steps:
       - name: Check out repository code at the tag
         uses: actions/checkout@v4
-        # No LFS needed for building the package itself
 
       - name: Set up Python
-        id: setup # <<< Added id: setup
+        id: setup
         uses: actions/setup-python@v5
         with:
-          # Use a specific Python version known to work for building
           python-version: "3.11"
 
       - name: Install uv
@@ -31,52 +37,40 @@ jobs:
           python -m pip install --upgrade pip
           pip install uv
 
-      # Combined Venv Creation and Build Dependency Installation
       - name: Create venv and Install build dependencies
         run: |
-          # Create the virtual environment using the specific python version from the setup step
-          # Use the step id 'setup' to access its outputs
           echo "Creating venv with Python version: ${{ steps.setup.outputs.python-version }}"
           uv venv
-          # Activate the virtual environment
           source .venv/bin/activate
-          # Install build and twine within the activated environment
           echo "Installing build tools..."
           uv pip install build twine
           echo "Build tools installed."
 
       - name: Build source distribution and wheel
         run: |
-          # Activate the environment again for this step
           source .venv/bin/activate
           echo "Building distributions..."
           python -m build
           echo "Distributions built."
-          ls -l dist/ # List built files for verification
+          ls -l dist/
 
       - name: Verify built distributions (Optional but Recommended)
         run: |
-          # Activate the environment again for this step
           source .venv/bin/activate
           echo "Checking distributions with twine..."
           twine check dist/*
           echo "Twine check complete."
 
       - name: Publish distribution to TestPyPI
-        # Upload all releases (including RCs) to TestPyPI first
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # Use an API token from TestPyPI, stored in GitHub secrets
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          # Use TestPyPI for testing
           repository-url: https://test.pypi.org/legacy/
-          # Optionally skip existing packages on TestPyPI
-          # skip-existing: true
+          # Attestations enabled by default when password is not set
 
       - name: Publish distribution to PyPI
-        # Only publish actual releases (not RCs, betas, etc.) to main PyPI
         if: github.ref_type == 'tag' && !contains(github.ref_name, 'a') && !contains(github.ref_name, 'b') && !contains(github.ref_name, 'rc')
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # Use an API token from PyPI, stored in GitHub secrets
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          # repository-url: https://upload.pypi.org/legacy/ # Default, not needed
+          repository-url: https://upload.pypi.org/legacy/
+          # Attestations enabled by default when password is not set
