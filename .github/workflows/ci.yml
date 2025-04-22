@@ -12,7 +12,7 @@ on:
 jobs:
   lint-and-test:
     # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     strategy:
       # Don't cancel other jobs if one fails
       fail-fast: false
@@ -21,13 +21,6 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - name: Install Git LFS
-        run: |
-          sudo apt-get update # Update package list
-          sudo apt-get install -y git-lfs # Install git-lfs using apt
-          git lfs install --system # Initialize LFS
-          git lfs pull # Pull LFS files
-          
       - name: Check out repository code
         uses: actions/checkout@v4
         with:
