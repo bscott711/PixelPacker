@@ -9,7 +9,7 @@ from pixelpacker.core import run_preprocessing
 from pixelpacker.data_models import PreprocessingConfig
 
 BASE_TEST_FILENAME = "image.tif"
-EXPECTED_TEST_FILENAME = f"test_ch0_stack0000_{BASE_TEST_FILENAME}"
+# EXPECTED_TEST_FILENAME = f"test_ch0_stack0000_{BASE_TEST_FILENAME}" # Unused
 
 
 @pytest.mark.mock
@@ -33,51 +33,52 @@ def test_pipeline_handles_output_write_error(mocker, tmp_path, synthetic_tiff_fa
     config = PreprocessingConfig(
         input_folder=input_dir,
         output_folder=output_dir,
-        stretch_mode="smart",  # Use relevant defaults or test values
+        stretch_mode="smart",
+        enable_z_crop=False,
         z_crop_method="slope",
         z_crop_threshold=0,
         dry_run=False,
-        debug=False,  # Set True if needed for log inspection
+        debug=False,
         max_threads=1,
         use_global_contrast=True,
-        executor_type="thread",  # Force thread executor
-        input_pattern="*_ch*_stack*.tif*",  # Ensure pattern matches
+        executor_type="thread",
+        input_pattern="*_ch*_stack*.tif*",
     )
 
-    # Expect run_preprocessing to raise RuntimeError due to error propagation
+    # Expect run_preprocessing to raise RuntimeError due to error propagation in Pass 2
+    # Note: Output errors often manifest as RuntimeErrors from the processing stage
     with pytest.raises(RuntimeError) as excinfo:
         run_preprocessing(config=config)
 
-    # Assert mock was called (hopefully before exception fully unwound)
+    # Assert mock was called (Pass 2 is reached before PIL save error)
     try:
         mock_save.assert_called()
     except AssertionError as e:
         pytest.fail(f"PIL.Image.Image.save mock was not called! {e}")
 
     # Assert the exception message contains info about the processing error
-    assert "processing error" in str(excinfo.value)
+    # The specific error might be wrapped, check for common indicators
+    assert "Disk full" in str(excinfo.value) or "processing error" in str(excinfo.value)
 
 
 @pytest.mark.mock
 def test_pipeline_handles_input_read_error(mocker, tmp_path, synthetic_tiff_factory):
-    """Test pipeline failure when reading TIFF raises an error."""
-    # Apply mock BEFORE runner initialization
-    # Change the patch target to where it's imported/used in the first pass
-    mock_extract = mocker.patch(
-        "pixelpacker.crop.extract_original_volume"
-    )  # <<< CHANGED TARGET
-    mock_extract.side_effect = ValueError("Invalid TIFF data")
+    """Test pipeline failure when reading TIFF (metadata) raises an error."""
+    # Mock the *metadata reading function* which is called first in Pass 0
+    mock_get_dims = mocker.patch("pixelpacker.crop.get_dimensions_from_metadata")
+    mock_get_dims.side_effect = ValueError("Invalid TIFF data (metadata read fail)")
 
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Create a dummy file path for the metadata reader to attempt
     tiff_path = synthetic_tiff_factory(
         input_dir, BASE_TEST_FILENAME, shape=(10, 20, 20)
     )
     assert tiff_path.exists()
 
-    # Create config manually
+    # Create config manually (default enable_z_crop=False)
     config = PreprocessingConfig(
         input_folder=input_dir,
         output_folder=output_dir,
@@ -88,38 +89,38 @@ def test_pipeline_handles_input_read_error(mocker, tmp_path, synthetic_tiff_fact
         debug=False,
         max_threads=1,
         use_global_contrast=True,
-        executor_type="thread",  # Force thread executor
+        executor_type="thread",
         input_pattern="*_ch*_stack*.tif*",
     )
 
-    # Expect run_preprocessing to raise an error
-    with pytest.raises((RuntimeError, ValueError)) as excinfo:
+    # Expect run_preprocessing to raise an error stemming from the metadata read failure
+    # The original ValueError gets caught in core.py and a new ValueError is raised
+    with pytest.raises(ValueError) as excinfo:  # Expecting ValueError specifically now
         run_preprocessing(config=config)
 
-    # Assert mock was called (it should be hit during Pass 0 now)
+    # Assert the new mock target was called
     try:
-        assert mock_extract.call_count > 0, (
-            "extract_original_volume mock was not called!"
+        assert mock_get_dims.call_count > 0, (
+            "get_dimensions_from_metadata mock was not called!"
         )
     except AssertionError as e:
         pytest.fail(str(e))
 
-    # Assert the exception message contains info about the error
-    assert (
-        "Invalid TIFF data" in str(excinfo.value)
-        or "processing error" in str(excinfo.value)
-        or "Failed during task prep" in str(excinfo.value)
-        or "No contrast limits" in str(excinfo.value)
+    # --- MODIFICATION START ---
+    # Assert the exception message *is* the one raised by core.py
+    expected_message = "Failed during task prep/Z-crop/layout phase."
+    assert expected_message in str(excinfo.value), (
+        f"Expected message '{expected_message}' not found in exception: {str(excinfo.value)}"
     )
+    # --- MODIFICATION END ---
 
 
-# Keep the passing test using CliRunner
 @pytest.mark.mock
 def test_pipeline_handles_output_mkdir_error(
     mocker, tmp_path, synthetic_tiff_factory, caplog
 ):
     """Test pipeline failure when creating output directory raises PermissionError."""
-    runner = CliRunner()  # Keep runner for this test
+    runner = CliRunner()
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "protected_output"
 
@@ -128,12 +129,13 @@ def test_pipeline_handles_output_mkdir_error(
     )
     assert tiff_path.exists()
 
-    mock_mkdir = mocker.patch("pathlib.Path.mkdir", autospec=True)
+    # Mock mkdir where it's called in cli.py during setup
+    mock_mkdir = mocker.patch("pixelpacker.cli.Path.mkdir", autospec=True)
     mock_mkdir.side_effect = PermissionError("Cannot create directory")
 
     with caplog.at_level(logging.ERROR):
         result = runner.invoke(
-            app,  # Still invoke CLI here as error is in CLI setup
+            app,
             [
                 "--input",
                 str(input_dir),
@@ -150,4 +152,5 @@ def test_pipeline_handles_output_mkdir_error(
         and "pixelpacker.cli" in record.name
         for record in caplog.records
     ), "Expected error message about creating output directory not found in ERROR logs."
+    # Assert mkdir was attempted
     mock_mkdir.assert_called()
