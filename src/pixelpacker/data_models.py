@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import (
     TypedDict,
     Literal,
-)  # Add List, Optional, Any if moving type aliases here
+    Optional,  # Added Optional
+)
+
 
 # --- Data classes for configuration and layout ---
 
@@ -51,6 +53,7 @@ class PreprocessingConfig:
     use_global_contrast: bool = True
     executor_type: Literal["thread", "process"] = "process"
     input_pattern: str = "*_ch*_stack*.tif*"
+    enable_z_crop: bool = False  # <<< ADDED: Default to False (no cropping)
 
 
 @dataclass
@@ -71,3 +74,16 @@ class ProcessingResult:
     filename: str  # Output filename
     p_low: float  # Applied low percentile/value
     p_high: float  # Applied high percentile/value
+
+
+# --- Added CropRangeInfo dataclass (moved from crop.py for clarity) ---
+@dataclass
+class CropRangeInfo:
+    """Holds results from Pass 0 Z-range finding task."""
+
+    path: Path
+    z_start: int
+    z_end: int
+    original_depth: Optional[int] = None  # Added original_depth
+    width: Optional[int] = None
+    height: Optional[int] = None

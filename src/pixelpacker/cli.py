@@ -3,9 +3,8 @@
 import enum
 import json
 import logging
-import typing
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 import cProfile
 import pstats
 import io
@@ -18,7 +17,7 @@ from typing_extensions import Annotated
 # --- Core Imports ---
 from . import __version__
 from .core import run_preprocessing
-from .data_models import PreprocessingConfig
+from .data_models import PreprocessingConfig  # Keep existing import
 
 log = logging.getLogger(__name__)
 app = typer.Typer(
@@ -40,6 +39,9 @@ class ExecutorChoice(str, enum.Enum):
 
 
 # --- Config Loading Helper ---
+# _load_config_from_file remains the same
+
+
 def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
     """Loads configuration from YAML or JSON file."""
     log.info(f"Loading configuration from file: {config_path}")
@@ -144,12 +146,20 @@ def main(  # noqa: PLR0913
             help="Contrast stretch mode (smart, max, imagej-auto, smart-late).",
         ),
     ] = "smart",
+    # --- Z-Crop Options --- <<< MODIFIED SECTION START
+    enable_z_crop: Annotated[
+        bool,
+        typer.Option(
+            "--enable-z-crop/--disable-z-crop",
+            help="Explicitly enable/disable Z-cropping (default is disabled).",
+        ),
+    ] = False,  # Default is False
     z_crop_method: Annotated[
         ZCropMethod,
         typer.Option(
             "--z-crop-method",
             case_sensitive=False,
-            help="Method for automatic Z-cropping.",
+            help="Method for automatic Z-cropping (only used if --enable-z-crop is set).",
         ),
     ] = ZCropMethod.slope,
     z_crop_threshold: Annotated[
@@ -157,9 +167,10 @@ def main(  # noqa: PLR0913
         typer.Option(
             "--z-crop-threshold",
             min=0,
-            help="Intensity threshold for 'threshold' Z-crop method.",
+            help="Intensity threshold for 'threshold' Z-crop method (only used if --enable-z-crop is set).",
         ),
     ] = 0,
+    # --- END Z-Crop Options --- <<< MODIFIED SECTION END
     per_image_contrast: Annotated[
         bool,
         typer.Option(
@@ -214,6 +225,7 @@ def main(  # noqa: PLR0913
 ):
     """Main command function: Loads config, merges args, runs preprocessing."""
     # --- Initial Logging Setup ---
+    # (remains the same)
     initial_cli_debug_value = ctx.params.get("debug", False)
     initial_log_level = logging.DEBUG if initial_cli_debug_value else logging.INFO
     if ctx.params.get("profile", False):
@@ -234,11 +246,13 @@ def main(  # noqa: PLR0913
     try:
         # 1. Initialize with Typer Defaults
         typer_param_defs = {p.name: p for p in ctx.command.params if p.name is not None}
+        # --- ADD 'enable_z_crop' to mapping ---
         param_to_config_map = {
             "input_folder": "input_folder",
             "output_folder": "output_folder",
             "input_pattern": "input_pattern",
             "stretch_mode": "stretch_mode",
+            "enable_z_crop": "enable_z_crop",  # <<< ADDED
             "z_crop_method": "z_crop_method",
             "z_crop_threshold": "z_crop_threshold",
             "per_image_contrast": "use_global_contrast",
@@ -259,12 +273,18 @@ def main(  # noqa: PLR0913
 
             if isinstance(default_value, enum.Enum):
                 processed_default = default_value.value
-            elif isinstance(default_value, Path):
-                processed_default = default_value.resolve()
+            # Removed Path processing here, handle later if needed
 
+            # Special handling for boolean flags mapped differently
             if param_name == "per_image_contrast":
+                # Default value is False, so use_global_contrast becomes True
                 config_dict["use_global_contrast"] = not processed_default
+            # --- ADDED handling for enable_z_crop ---
+            elif param_name == "enable_z_crop":
+                # Default value is False, matches config field directly
+                config_dict["enable_z_crop"] = processed_default
             else:
+                # Other parameters map directly
                 config_dict[config_key] = processed_default
         log.debug(f"Config dict after Typer defaults: {config_dict}")
 
@@ -276,24 +296,48 @@ def main(  # noqa: PLR0913
             for key, value in file_values.items():
                 if key in PreprocessingConfig.__dataclass_fields__:
                     try:
+                        # Type conversions (ensure bools are handled correctly)
                         if key in ["input_folder", "output_folder"] and isinstance(
                             value, str
                         ):
-                            config_dict[key] = Path(value).resolve()
+                            config_dict[key] = Path(value)  # Resolve later
                         elif key == "z_crop_threshold" and value is not None:
                             config_dict[key] = int(value)
                         elif key == "max_threads" and value is not None:
                             config_dict[key] = int(value)
                         elif (
-                            key in ["use_global_contrast", "dry_run", "debug"]
+                            key
+                            in [
+                                "use_global_contrast",
+                                "dry_run",
+                                "debug",
+                                "enable_z_crop",
+                            ]  # <<< ADDED enable_z_crop
                             and value is not None
                         ):
-                            config_dict[key] = bool(value)
+                            # Explicitly handle boolean conversion robustly
+                            if isinstance(value, bool):
+                                config_dict[key] = value
+                            elif isinstance(value, str):
+                                config_dict[key] = value.lower() in [
+                                    "true",
+                                    "1",
+                                    "yes",
+                                    "on",
+                                ]
+                            elif isinstance(value, int):
+                                config_dict[key] = bool(value)
+                            else:
+                                log.warning(
+                                    f"Could not parse boolean value for '{key}': {value}. Ignoring."
+                                )
                         elif key == "z_crop_method" and isinstance(value, str):
                             config_dict[key] = ZCropMethod(value).value
                         elif key == "executor_type" and isinstance(value, str):
                             config_dict[key] = ExecutorChoice(value).value
-                        elif value is not None:
+                        elif (
+                            value is not None
+                        ):  # Assign other types directly if not None
                             config_dict[key] = value
                         else:
                             log.debug(
@@ -303,6 +347,7 @@ def main(  # noqa: PLR0913
                         log.warning(
                             f"Could not convert config file value for '{key}': {value} - {e}."
                         )
+                # Handle deprecated 'executor' key (remains same)
                 elif key == "executor" and "executor_type" not in file_values:
                     try:
                         if isinstance(value, str):
@@ -327,7 +372,6 @@ def main(  # noqa: PLR0913
         log.debug("Step 3: Applying explicit CLI arguments...")
         cli_applied_values: Dict[str, Any] = {}
         for param_name, cli_arg_value in ctx.params.items():
-            # Skip non-config params or params not explicitly set on CLI
             if param_name in ["config_file", "profile", "version"]:
                 continue
             source = ctx.get_parameter_source(param_name)
@@ -347,45 +391,28 @@ def main(  # noqa: PLR0913
             target_config_key = config_key
             processed_cli_value = cli_arg_value
 
+            # Special handling for boolean flags mapped differently
             if param_name == "per_image_contrast":
                 processed_cli_value = not cli_arg_value
                 target_config_key = "use_global_contrast"
+            elif param_name == "enable_z_crop":
+                # This flag maps directly, no special processing needed for value
+                target_config_key = "enable_z_crop"
 
+            # Attempt type conversion/validation (simplified)
             try:
-                field = PreprocessingConfig.__dataclass_fields__[target_config_key].type
-                origin = typing.get_origin(field)
-                args = typing.get_args(field)
-                is_opt = origin is Union and type(None) in args
-                is_path = field is Path or (is_opt and Path in args)
+                final_value = processed_cli_value
+                if isinstance(processed_cli_value, enum.Enum):
+                    final_value = processed_cli_value.value
+                elif isinstance(processed_cli_value, Path):
+                    final_value = processed_cli_value  # Resolve later
 
-                final: Any  # Define final variable
-                if isinstance(cli_arg_value, enum.Enum):
-                    final = cli_arg_value.value
-                elif is_path:
-                    final = (
-                        None if cli_arg_value is None else Path(cli_arg_value).resolve()
-                    )
-                elif field is int and cli_arg_value is not None:
-                    final = int(cli_arg_value)
-                elif field is bool and cli_arg_value is not None:
-                    if param_name != "per_image_contrast":
-                        final = bool(cli_arg_value)
-                    else:
-                        final = processed_cli_value
-                elif is_opt and cli_arg_value is None:
-                    final = None
-                else:
-                    final = cli_arg_value
-
-                processed_cli_value = final
-
+                if config_dict.get(target_config_key) != final_value:
+                    config_dict[target_config_key] = final_value
+                    cli_applied_values[target_config_key] = final_value
             except Exception as e:
                 log.error(f"Invalid CLI value for {param_name}: {e}")
                 raise
-
-            if config_dict.get(target_config_key) != processed_cli_value:
-                config_dict[target_config_key] = processed_cli_value
-                cli_applied_values[target_config_key] = processed_cli_value
 
         if cli_applied_values:
             log.info("Applied CLI overrides: %s", cli_applied_values)
@@ -400,30 +427,28 @@ def main(  # noqa: PLR0913
         if not output_val:
             raise ValueError("Output folder is required.")
 
-        if not isinstance(input_val, Path):
-            raise TypeError(
-                f"Input folder must be a valid path, got: {type(input_val)}"
-            )
-        if not isinstance(output_val, Path):
-            raise TypeError(
-                f"Output folder must be a valid path, got: {type(output_val)}"
-            )
+        # Ensure paths are resolved *before* creating the config object
+        input_path = Path(input_val).resolve()
+        output_path = Path(output_val).resolve()
+        config_dict["input_folder"] = input_path
+        config_dict["output_folder"] = output_path
 
-        output_dir_path = output_val
+        if not input_path.is_dir():
+            raise FileNotFoundError(f"Input directory does not exist: {input_path}")
+
+        # Check output dir writability
         try:
-            output_dir_path.mkdir(parents=True, exist_ok=True)
-            dummy_file = output_dir_path / ".pixelpacker_write_test"
+            output_path.mkdir(parents=True, exist_ok=True)
+            dummy_file = output_path / ".pixelpacker_write_test"
             dummy_file.touch()
             dummy_file.unlink()
-            log.info(
-                f"Ensured output directory exists and is writable: {output_dir_path}"
-            )
+            log.info(f"Ensured output directory exists and is writable: {output_path}")
         except OSError as e:
             log.error(
-                f"Failed to create or write to output directory {output_dir_path}: {e}"
+                f"Failed to create or write to output directory {output_path}: {e}"
             )
             raise PermissionError(
-                f"Cannot write to output directory: {output_dir_path}"
+                f"Cannot write to output directory: {output_path}"
             ) from e
 
         # 5. Create final PreprocessingConfig object
@@ -444,11 +469,11 @@ def main(  # noqa: PLR0913
         log.debug(f"Final configuration object: {final_config}")
 
         # --- Update Log Level based on Final Config ---
-        if not profile_flag:  # Check actual flag value from ctx.params
+        if not profile_flag:
             final_log_level = logging.DEBUG if final_config.debug else logging.INFO
             current_log_level = logging.getLogger().getEffectiveLevel()
             if final_log_level != current_log_level:
-                logging.getLogger().setLevel(final_log_level)
+                # Reset logging config with potentially new level and format
                 log_format = "%(levelname)s: [%(name)s] %(message)s"
                 date_format = None
                 if final_config.debug:
@@ -456,6 +481,8 @@ def main(  # noqa: PLR0913
                         "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"
                     )
                     date_format = "%H:%M:%S"
+
+                # Use force=True to replace existing handlers
                 logging.basicConfig(
                     level=final_log_level,
                     format=log_format,
@@ -484,6 +511,7 @@ def main(  # noqa: PLR0913
         raise typer.Exit(code=1)
 
     # --- Run Core Processing (Potentially Profiled) ---
+    # (profiler logic remains the same)
     profiler = None
     if profile_flag:  # Use stored flag value
         profiler = cProfile.Profile()
@@ -495,7 +523,6 @@ def main(  # noqa: PLR0913
         log.info("✅ Preprocessing finished successfully.")
     except (ValueError, FileNotFoundError, OSError, TypeError, RuntimeError) as e:
         log.error(f"❌ Pipeline Error: {e}", exc_info=final_config.debug)
-        # Removed unused variable assignment
         if profiler:
             log.debug("Stopping profiler after pipeline error...")
             profiler.disable()
@@ -504,18 +531,15 @@ def main(  # noqa: PLR0913
         log.critical(
             f"❌ An unexpected critical pipeline error occurred: {e}", exc_info=True
         )
-        # Removed unused variable assignment
         if profiler:
             log.debug("Stopping profiler after critical pipeline error...")
             profiler.disable()
         raise typer.Exit(code=1)
     finally:
-        # Stop profiler if it was started
-        if profiler:  # Removed the .is_enabled() check
-            log.debug("Stopping profiler...")  # Simplified log message
+        if profiler:
+            log.debug("Stopping profiler...")
             profiler.disable()
 
-            # Process and print profiler stats
             log.info("📊 Processing profiler results...")
             stats_stream = io.StringIO()
             ps = pstats.Stats(profiler, stream=stats_stream).sort_stats("cumulative")

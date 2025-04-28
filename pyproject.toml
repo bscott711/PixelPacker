@@ -2,7 +2,7 @@
 
 [project]
 name = "pixelpacker"
-version = "0.3.0"
+version = "0.3.1"
 description = "Automates TIFF stack processing: autoscale, convert to 8‑bit, tile 3D volumes into 2D atlases, and compress to WebP for web‑based volumetric viewing."
 readme = "README.md"
 requires-python = ">=3.10"
