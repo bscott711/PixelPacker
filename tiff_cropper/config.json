@@ -1,0 +1,9 @@
+{
+    "input_dir": "Z:\\data\\Macropinocytosis\\2024\\20241023-WT_memmNG_mScarlet2xFYVE\\CS_1\\Cell_3\\GPUdecon",
+    "output_dir": "X:\\For_Brandon\\20241023-WT_memmNG_mScarlet2xFYVE\\CS1_Cell_3",
+    "start_z": 70,
+    "end_z": 280,
+    "start_x": 225,
+    "end_x": 910,
+    "workers": 12
+  }

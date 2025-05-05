@@ -1,0 +1,1 @@
+python crop_tool.py -c config.json
