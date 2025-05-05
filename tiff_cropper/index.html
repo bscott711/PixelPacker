@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive TIFF Cropper v2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tiff.js@1.0.0/tiff.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Make canvas take available space */
+        canvas {
+            border: 1px solid #d1d5db;
+            cursor: crosshair;
+            image-rendering: pixelated;
+            display: block; /* Prevent extra space below canvas */
+            max-width: 100%; /* Ensure canvas scales down */
+            height: auto; /* Maintain aspect ratio */
+        }
+        .canvas-container {
+            position: relative;
+            width: fit-content; /* Fit to canvas size */
+            height: fit-content;
+            margin: auto; /* Center the container */
+            overflow: hidden; /* Hide handles going outside */
+        }
+        /* Crop Lines Styling */
+        .crop-line { position: absolute; background-color: rgba(0, 255, 0, 0.7); pointer-events: auto; }
+        .crop-line-handle { position: absolute; background-color: #059669; border-radius: 50%; width: 10px; height: 10px; }
+        /* Vertical Lines (X Crop) */
+        .crop-line-v { width: 2px; height: 100%; top: 0; cursor: ew-resize; }
+        .crop-line-v .crop-line-handle { left: -4px; top: -5px; cursor: ew-resize; }
+        /* Horizontal Lines (Y Crop) */
+        .crop-line-h { height: 2px; width: 100%; left: 0; cursor: ns-resize; }
+        .crop-line-h .crop-line-handle { top: -4px; left: -5px; cursor: ns-resize; }
+        /* Z Lines Styling */
+        .z-line { position: absolute; pointer-events: auto; background-color: rgba(0, 0, 255, 0.7); }
+        .z-line-handle { position: absolute; background-color: #1d4ed8; border-radius: 50%; width: 10px; height: 10px; }
+        /* Z Lines on XZ (Horizontal) */
+        .z-line-xz { width: 100%; height: 2px; left: 0; cursor: ns-resize; }
+        .z-line-xz .z-line-handle { top: -4px; left: -5px; cursor: ns-resize; }
+        /* Z Lines on YZ (Vertical) */
+        .z-line-yz { height: 100%; width: 2px; top: 0; cursor: default; pointer-events: none; } /* Not draggable */
+        .z-line-yz .z-line-handle { display: none; } /* Hide handle on YZ */
+
+        /* Ortho Lines */
+        .ortho-line-x { position: absolute; height: 100%; width: 1px; background-color: rgba(255, 165, 0, 0.7); pointer-events: none; top: 0; }
+        .ortho-line-y { position: absolute; width: 100%; height: 1px; background-color: rgba(255, 165, 0, 0.7); pointer-events: none; left: 0; }
+        .loader { border: 4px solid #f3f4f6; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* Ensure Inter font is loaded */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        /* Slider styling */
+        input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 8px; background: #d1d5db; border-radius: 5px; outline: none; opacity: 0.7; transition: opacity .2s; margin-top: 4px; }
+        input[type=range]:hover { opacity: 1; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; background: #3b82f6; border-radius: 50%; cursor: pointer; }
+        input[type=range]::-moz-range-thumb { width: 16px; height: 16px; background: #3b82f6; border-radius: 50%; cursor: pointer; border: none; }
+    </style>
+</head>
+<body class="bg-gray-100 p-4 md:p-8">
+    <div class="max-w-7xl mx-auto bg-white p-6 rounded-lg shadow-md">
+        <h1 class="text-2xl font-bold mb-4 text-gray-800">Interactive TIFF Cropper v2</h1>
+
+        <div class="mb-6">
+            <button id="selectDirBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-md shadow transition duration-150 ease-in-out">
+                Select Input Directory
+            </button>
+            <p id="dirStatus" class="text-sm text-gray-600 mt-2 italic">No directory selected.</p>
+            <p id="fileStatus" class="text-sm text-gray-600 mt-1 italic"></p>
+        </div>
+
+        <div id="loader" class="hidden text-center">
+            <div class="loader"></div>
+            <p class="text-gray-600">Loading and processing TIFF stack...</p>
+        </div>
+
+        <div id="mainContent" class="hidden">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 bg-gray-50 p-4 rounded-md border">
+                <div>
+                    <label for="intensityMin" class="block text-sm font-medium text-gray-700">Min Intensity:</label>
+                    <input type="range" id="intensityMin" name="intensityMin" min="0" max="255" value="0">
+                    <span id="intensityMinVal" class="text-sm text-gray-600 ml-2">0</span>
+                </div>
+                <div>
+                    <label for="intensityMax" class="block text-sm font-medium text-gray-700">Max Intensity:</label>
+                    <input type="range" id="intensityMax" name="intensityMax" min="0" max="255" value="255">
+                    <span id="intensityMaxVal" class="text-sm text-gray-600 ml-2">255</span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <div class="border rounded-md p-2 bg-gray-50">
+                    <h2 class="text-lg font-semibold mb-2 text-center text-gray-700">XY Max Intensity Projection</h2>
+                    <div id="xyContainer" class="canvas-container">
+                        <canvas id="xyCanvas"></canvas>
+                        <div id="xLineLeft" class="crop-line crop-line-v"><div class="crop-line-handle"></div></div>
+                        <div id="xLineRight" class="crop-line crop-line-v"><div class="crop-line-handle"></div></div>
+                        <div id="yLineTop" class="crop-line crop-line-h"><div class="crop-line-handle"></div></div>
+                        <div id="yLineBottom" class="crop-line crop-line-h"><div class="crop-line-handle"></div></div>
+                        <div id="orthoLineX_xy" class="ortho-line-x hidden"></div>
+                        <div id="orthoLineY_xy" class="ortho-line-y hidden"></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-rows-2 gap-6">
+                    <div class="border rounded-md p-2 bg-gray-50">
+                        <h2 class="text-lg font-semibold mb-2 text-center text-gray-700">YZ Orthogonal View</h2>
+                         <div id="yzContainer" class="canvas-container">
+                            <canvas id="yzCanvas"></canvas>
+                            <div id="zLineTopYZ" class="z-line z-line-yz"><div class="z-line-handle"></div></div>
+                            <div id="zLineBottomYZ" class="z-line z-line-yz"><div class="z-line-handle"></div></div>
+                             <div id="orthoLineY_yz" class="ortho-line-y hidden"></div>
+                        </div>
+                    </div>
+                    <div class="border rounded-md p-2 bg-gray-50">
+                         <h2 class="text-lg font-semibold mb-2 text-center text-gray-700">XZ Orthogonal View</h2>
+                         <div id="xzContainer" class="canvas-container">
+                            <canvas id="xzCanvas"></canvas>
+                             <div id="zLineTopXZ" class="z-line z-line-xz"><div class="z-line-handle"></div></div>
+                            <div id="zLineBottomXZ" class="z-line z-line-xz"><div class="z-line-handle"></div></div>
+                             <div id="orthoLineX_xz" class="ortho-line-x hidden"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gray-100 p-4 rounded-md mb-6 border border-gray-200">
+                <h2 class="text-lg font-semibold mb-3 text-gray-700">Crop Information & Output</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                    <div><span class="font-medium text-gray-600">X Range:</span> <span id="xRangeInfo" class="ml-1 text-gray-800">N/A</span></div>
+                    <div><span class="font-medium text-gray-600">Y Range:</span> <span id="yRangeInfo" class="ml-1 text-gray-800">N/A</span></div>
+                    <div><span class="font-medium text-gray-600">Z Range:</span> <span id="zRangeInfo" class="ml-1 text-gray-800">N/A</span></div>
+                    <div><span class="font-medium text-gray-600">Ortho (X,Y):</span> <span id="orthoPosInfo" class="ml-1 text-gray-800">N/A</span></div>
+                    <div><span class="font-medium text-gray-600">Dims (Z/I,Y,X):</span> <span id="dimsInfo" class="ml-1 text-gray-800">N/A</span></div>
+                    <div><span class="font-medium text-gray-600">Data Range:</span> <span id="dataRangeInfo" class="ml-1 text-gray-800">N/A</span></div>
+                </div>
+                <div class="mt-4">
+                     <button id="generateConfigBtn" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-md shadow transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        Generate & Download config.json
+                    </button>
+                </div>
+                <pre id="configOutput" class="mt-4 p-3 bg-gray-200 text-gray-700 rounded-md text-xs overflow-x-auto hidden"></pre>
+            </div>
+        </div>
+        <div id="errorMessages" class="mt-4 text-red-600 text-sm"></div>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const selectDirBtn = document.getElementById('selectDirBtn');
+        const dirStatus = document.getElementById('dirStatus');
+        const fileStatus = document.getElementById('fileStatus');
+        const loader = document.getElementById('loader');
+        const mainContent = document.getElementById('mainContent');
+        const errorMessages = document.getElementById('errorMessages');
+
+        const xyCanvas = document.getElementById('xyCanvas');
+        const yzCanvas = document.getElementById('yzCanvas');
+        const xzCanvas = document.getElementById('xzCanvas');
+        const xyCtx = xyCanvas.getContext('2d');
+        const yzCtx = yzCanvas.getContext('2d');
+        const xzCtx = xzCanvas.getContext('2d');
+
+        const xyContainer = document.getElementById('xyContainer');
+        const yzContainer = document.getElementById('yzContainer');
+        const xzContainer = document.getElementById('xzContainer');
+
+        // XY Crop lines
+        const xLineLeft = document.getElementById('xLineLeft');
+        const xLineRight = document.getElementById('xLineRight');
+        const yLineTop = document.getElementById('yLineTop');
+        const yLineBottom = document.getElementById('yLineBottom');
+
+        // Ortho lines
+        const orthoLineX_xy = document.getElementById('orthoLineX_xy');
+        const orthoLineY_xy = document.getElementById('orthoLineY_xy');
+        const orthoLineY_yz = document.getElementById('orthoLineY_yz');
+        const orthoLineX_xz = document.getElementById('orthoLineX_xz');
+
+        // Z lines
+        const zLineTopYZ = document.getElementById('zLineTopYZ'); // Visual only
+        const zLineBottomYZ = document.getElementById('zLineBottomYZ'); // Visual only
+        const zLineTopXZ = document.getElementById('zLineTopXZ'); // Draggable
+        const zLineBottomXZ = document.getElementById('zLineBottomXZ'); // Draggable
+
+        // Intensity sliders
+        const intensityMinSlider = document.getElementById('intensityMin');
+        const intensityMaxSlider = document.getElementById('intensityMax');
+        const intensityMinVal = document.getElementById('intensityMinVal');
+        const intensityMaxVal = document.getElementById('intensityMaxVal');
+
+        // Info displays
+        const xRangeInfo = document.getElementById('xRangeInfo');
+        const yRangeInfo = document.getElementById('yRangeInfo');
+        const zRangeInfo = document.getElementById('zRangeInfo');
+        const orthoPosInfo = document.getElementById('orthoPosInfo');
+        const dimsInfo = document.getElementById('dimsInfo');
+        const dataRangeInfo = document.getElementById('dataRangeInfo');
+        const generateConfigBtn = document.getElementById('generateConfigBtn');
+        const configOutput = document.getElementById('configOutput');
+
+        // --- State Variables ---
+        let tiff = null;
+        let imageCache = []; // [z][pixel_index] -> Uint8ClampedArray
+        let imageWidth = 0;
+        let imageHeight = 0;
+        let imageDepth = 0;
+        let rawMin = 0; // Min intensity in the loaded data
+        let rawMax = 255; // Max intensity in the loaded data
+        let displayMin = 0; // Current min display intensity
+        let displayMax = 255; // Current max display intensity
+
+        let canvasScale = 1;
+        let displayWidth = 300; // Target display width for canvases
+        let displayHeight = 300; // Target display height for canvases
+
+        let cropParams = { start_x: 0, end_x: 0, start_y: 0, end_y: 0, start_z: 0, end_z: 0 };
+        let orthoX = 0;
+        let orthoY = 0;
+
+        let draggingLine = null; // { element: HTMLElement, type: 'x'|'y'|'z', side: 'left'|'right'|'top'|'bottom' }
+
+        // --- Initialization ---
+        selectDirBtn.addEventListener('click', selectDirectory);
+        intensityMinSlider.addEventListener('input', handleIntensityChange);
+        intensityMaxSlider.addEventListener('input', handleIntensityChange);
+        generateConfigBtn.addEventListener('click', generateAndDownloadConfig);
+
+        // --- Functions ---
+        function showError(message) { /* ... (same as before) ... */
+            console.error(message);
+            errorMessages.textContent = `Error: ${message}`;
+            loader.classList.add('hidden');
+            mainContent.classList.add('hidden'); }
+        function clearError() { errorMessages.textContent = ''; }
+        async function selectDirectory() { /* ... (same as before) ... */
+            clearError();
+            if (!window.showDirectoryPicker) {
+                showError("Your browser does not support the File System Access API. Try Chrome or Edge.");
+                return;
+            }
+            try {
+                const dirHandle = await window.showDirectoryPicker();
+                dirStatus.textContent = `Selected Directory: ${dirHandle.name}`;
+                fileStatus.textContent = 'Scanning for TIFF files...';
+                loader.classList.remove('hidden');
+                mainContent.classList.add('hidden');
+                configOutput.classList.add('hidden');
+                generateConfigBtn.disabled = true;
+
+                await processDirectory(dirHandle);
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    showError(`Failed to select directory: ${err.message}`);
+                } else {
+                    dirStatus.textContent = 'Directory selection cancelled.';
+                }
+                loader.classList.add('hidden');
+            } }
+        async function processDirectory(dirHandle) { /* ... (same as before) ... */
+            let firstTiffFile = null;
+            let tiffFileName = '';
+            try {
+                for await (const entry of dirHandle.values()) {
+                    if (entry.kind === 'file' && (entry.name.toLowerCase().endsWith('.tif') || entry.name.toLowerCase().endsWith('.tiff'))) {
+                        firstTiffFile = await entry.getFile();
+                        tiffFileName = entry.name;
+                        break; // Process only the first one found
+                    }
+                }
+
+                if (!firstTiffFile) {
+                    showError('No .tif or .tiff files found in the selected directory.');
+                    return;
+                }
+
+                fileStatus.textContent = `Loading file: ${tiffFileName}`;
+                await loadAndProcessTiff(firstTiffFile);
+
+            } catch (err) {
+                showError(`Failed to process directory: ${err.message}`);
+            } }
+
+        async function loadAndProcessTiff(file) {
+            try {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const arrayBuffer = e.target.result;
+                        // Adjust memory based on expected file sizes if needed
+                        Tiff.initialize({ TOTAL_MEMORY: 1024 * 1024 * 1024 });
+                        tiff = new Tiff({ buffer: arrayBuffer });
+
+                        imageDepth = tiff.countDirectory();
+                        if (imageDepth === 0) { showError('TIFF file contains no images.'); return; }
+
+                        tiff.setDirectory(0);
+                        imageWidth = tiff.width();
+                        imageHeight = tiff.height();
+
+                        if (!imageWidth || !imageHeight || !imageDepth) {
+                             showError(`Could not read valid dimensions (W: ${imageWidth}, H: ${imageHeight}, D: ${imageDepth})`); return;
+                        }
+                        dimsInfo.textContent = `${imageDepth}, ${imageHeight}, ${imageWidth}`;
+
+                        // Decode images and find data range
+                        imageCache = [];
+                        rawMin = 255; // Start high for min
+                        rawMax = 0;   // Start low for max
+                        console.log(`Decoding ${imageDepth} slices...`);
+                        fileStatus.textContent = `Decoding ${imageDepth} slices...`;
+                        await new Promise(resolve => setTimeout(resolve, 50)); // UI update yield
+
+                        for (let i = 0; i < imageDepth; i++) {
+                            tiff.setDirectory(i);
+                            const canvas = tiff.toCanvas();
+                            const ctx = canvas.getContext('2d');
+                            const imageData = ctx.getImageData(0, 0, imageWidth, imageHeight);
+                            const grayData = new Uint8ClampedArray(imageWidth * imageHeight);
+                            for (let j = 0; j < imageData.data.length; j += 4) {
+                                const val = imageData.data[j]; // Assuming grayscale stored in R channel
+                                grayData[j / 4] = val;
+                                if (val < rawMin) rawMin = val;
+                                if (val > rawMax) rawMax = val;
+                            }
+                            imageCache.push(grayData);
+                        }
+                        console.log("Decoding complete.");
+                        fileStatus.textContent = `File loaded: ${file.name}`;
+                        dataRangeInfo.textContent = `[${rawMin} - ${rawMax}]`;
+
+                        // Set up intensity sliders
+                        intensityMinSlider.min = rawMin;
+                        intensityMinSlider.max = rawMax;
+                        intensityMinSlider.value = rawMin;
+                        intensityMaxSlider.min = rawMin;
+                        intensityMaxSlider.max = rawMax;
+                        intensityMaxSlider.value = rawMax;
+                        displayMin = rawMin;
+                        displayMax = rawMax;
+                        intensityMinVal.textContent = displayMin;
+                        intensityMaxVal.textContent = displayMax;
+
+                        initializeUI();
+                        loader.classList.add('hidden');
+                        mainContent.classList.remove('hidden');
+
+                    } catch (err) { showError(`Error processing TIFF data: ${err.message}`); }
+                };
+                reader.onerror = (e) => { showError(`File reading error: ${e.target.error}`); };
+                reader.readAsArrayBuffer(file);
+            } catch (err) { showError(`Failed to load TIFF: ${err.message}`); }
+        }
+
+        function initializeUI() {
+            // Calculate scaling
+            const maxDim = Math.max(imageWidth, imageHeight, imageDepth);
+            // Adjust display size dynamically? For now, fixed max.
+            const scaleX = displayWidth / imageWidth;
+            const scaleY = displayHeight / imageHeight;
+            // Use separate scales for ortho views if depth is very different
+            const scaleZ_yz = displayWidth / imageDepth; // Z is width in YZ
+            const scaleZ_xz = displayHeight / imageDepth; // Z is height in XZ
+
+            // Let's try to keep aspect ratios reasonable
+            // Scale XY based on largest of width/height fitting displayWidth/Height
+            canvasScale = Math.min(displayWidth / imageWidth, displayHeight / imageHeight, 1);
+
+            xyCanvas.width = Math.round(imageWidth * canvasScale);
+            xyCanvas.height = Math.round(imageHeight * canvasScale);
+
+            // Scale ortho views independently
+            const yzScale = Math.min(displayWidth / imageDepth, displayHeight / imageHeight, 1);
+            yzCanvas.width = Math.round(imageDepth * yzScale);
+            yzCanvas.height = Math.round(imageHeight * yzScale);
+
+            const xzScale = Math.min(displayWidth / imageWidth, displayHeight / imageDepth, 1);
+            xzCanvas.width = Math.round(imageWidth * xzScale);
+            xzCanvas.height = Math.round(imageDepth * xzScale);
+
+
+            // Set container sizes
+            xyContainer.style.width = `${xyCanvas.width}px`; xyContainer.style.height = `${xyCanvas.height}px`;
+            yzContainer.style.width = `${yzCanvas.width}px`; yzContainer.style.height = `${yzCanvas.height}px`;
+            xzContainer.style.width = `${xzCanvas.width}px`; xzContainer.style.height = `${xzCanvas.height}px`;
+
+            // Initial crop = full image
+            cropParams = { start_x: 0, end_x: imageWidth, start_y: 0, end_y: imageHeight, start_z: 0, end_z: imageDepth };
+            orthoX = Math.floor(imageWidth / 2);
+            orthoY = Math.floor(imageHeight / 2);
+
+            // Draw initial views & lines
+            redrawAllViews(); // Includes MIP and Ortho with current intensity
+            updateCropInfo();
+            updateXYLinesPosition(); // Position XY lines
+            updateZLinesPosition(); // Position Z lines
+            updateOrthoLines();
+
+            // Enable interactions
+            setupCanvasInteractions();
+            setupLineInteractions(); // Setup for ALL draggable lines
+            generateConfigBtn.disabled = false;
+        }
+
+        function handleIntensityChange() {
+            displayMin = parseInt(intensityMinSlider.value);
+            displayMax = parseInt(intensityMaxSlider.value);
+
+            // Ensure min <= max
+            if (displayMin > displayMax) {
+                if (this === intensityMinSlider) {
+                    displayMax = displayMin;
+                    intensityMaxSlider.value = displayMax;
+                } else {
+                    displayMin = displayMax;
+                    intensityMinSlider.value = displayMin;
+                }
+            }
+
+            intensityMinVal.textContent = displayMin;
+            intensityMaxVal.textContent = displayMax;
+            redrawAllViews(); // Redraw with new intensity range
+        }
+
+        function redrawAllViews() {
+             drawXYMIP();
+             drawOrthoViews();
+        }
+
+        // --- Rendering with Intensity Scaling ---
+        function renderGrayscaleData(ctx, grayData, width, height) {
+            const canvas = ctx.canvas;
+            const displayW = canvas.width;
+            const displayH = canvas.height;
+            const imgData = ctx.createImageData(displayW, displayH);
+            const data = imgData.data;
+            const range = Math.max(1, displayMax - displayMin); // Avoid division by zero
+
+            // Calculate the effective scale for this canvas relative to original data
+            const currentCanvasScaleX = displayW / width;
+            const currentCanvasScaleY = displayH / height;
+
+            for (let dy = 0; dy < displayH; dy++) {
+                for (let dx = 0; dx < displayW; dx++) {
+                    const sx = Math.floor(dx / currentCanvasScaleX);
+                    const sy = Math.floor(dy / currentCanvasScaleY);
+
+                    if (sx >= 0 && sx < width && sy >= 0 && sy < height) {
+                         const sourceIndex = sy * width + sx;
+                         const rawValue = grayData[sourceIndex];
+                         // Scale intensity
+                         const scaledValue = Math.max(0, Math.min(255, Math.round(((rawValue - displayMin) / range) * 255)));
+
+                         const destIndex = (dy * displayW + dx) * 4;
+                         data[destIndex] = scaledValue;     // R
+                         data[destIndex + 1] = scaledValue; // G
+                         data[destIndex + 2] = scaledValue; // B
+                         data[destIndex + 3] = 255;         // A
+                    }
+                }
+            }
+            ctx.putImageData(imgData, 0, 0);
+        }
+
+        // --- Combined Drawing Functions ---
+        function drawXYMIP() { /* ... (same as before, uses renderGrayscaleData) ... */
+            if (!imageCache.length) return;
+            const mipData = new Uint8ClampedArray(imageWidth * imageHeight).fill(0);
+
+            for (let z = 0; z < imageDepth; z++) {
+                const slice = imageCache[z];
+                for (let i = 0; i < slice.length; i++) {
+                    if (slice[i] > mipData[i]) {
+                        mipData[i] = slice[i];
+                    }
+                }
+            }
+            renderGrayscaleData(xyCtx, mipData, imageWidth, imageHeight); }
+        function drawOrthoViews() { /* ... (same as before, uses renderGrayscaleData) ... */
+             if (!imageCache.length) return;
+
+            // YZ View (Z is horizontal, Y is vertical)
+            const yzData = new Uint8ClampedArray(imageDepth * imageHeight);
+            for (let z = 0; z < imageDepth; z++) {
+                const slice = imageCache[z];
+                for (let y = 0; y < imageHeight; y++) {
+                    const sourceIndex = y * imageWidth + orthoX;
+                    if (orthoX >= 0 && orthoX < imageWidth && sourceIndex < slice.length) {
+                        yzData[y * imageDepth + z] = slice[sourceIndex];
+                    } else { yzData[y * imageDepth + z] = 0; }
+                }
+            }
+            renderGrayscaleData(yzCtx, yzData, imageDepth, imageHeight);
+
+            // XZ View (X is horizontal, Z is vertical)
+            const xzData = new Uint8ClampedArray(imageWidth * imageDepth);
+             for (let z = 0; z < imageDepth; z++) {
+                const slice = imageCache[z];
+                if (orthoY >= 0 && orthoY < imageHeight) {
+                    const startRowIndex = orthoY * imageWidth;
+                    for (let x = 0; x < imageWidth; x++) {
+                        const sourceIndex = startRowIndex + x;
+                         if (sourceIndex < slice.length) { xzData[z * imageWidth + x] = slice[sourceIndex]; }
+                         else { xzData[z * imageWidth + x] = 0; }
+                    }
+                } else {
+                     for (let x = 0; x < imageWidth; x++) { xzData[z * imageWidth + x] = 0; }
+                }
+            }
+            renderGrayscaleData(xzCtx, xzData, imageWidth, imageDepth); }
+
+        // --- Interactions ---
+        function setupCanvasInteractions() {
+            // Remove rectangle drawing listeners
+            // xyCanvas.onmousedown = startDrawingRect;
+            // xyCanvas.onmousemove = drawRect; // Will be replaced by updateOrthoOnMouseMove
+            // xyCanvas.onmouseup = stopDrawingRect;
+            // xyCanvas.onmouseleave = stopDrawingRect;
+
+            // Ortho View Updates on Hover/Move
+            xyCanvas.onmousemove = updateOrthoOnMouseMove;
+        }
+
+        function updateOrthoOnMouseMove(e) {
+             // Don't update ortho while dragging a line
+             if (draggingLine) return;
+             updateOrthoPosition(e);
+             drawOrthoViews(); // Redraw ortho views based on new position
+             updateOrthoLines(); // Update indicator lines
+        }
+
+        function updateOrthoPosition(e) { /* ... (same as before) ... */
+            const rect = xyCanvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Calculate scale specific to XY canvas
+            const currentXYScaleX = xyCanvas.width / imageWidth;
+            const currentXYScaleY = xyCanvas.height / imageHeight;
+
+            orthoX = Math.max(0, Math.min(imageWidth - 1, Math.floor(mouseX / currentXYScaleX)));
+            orthoY = Math.max(0, Math.min(imageHeight - 1, Math.floor(mouseY / currentXYScaleY)));
+            orthoPosInfo.textContent = `(${orthoX}, ${orthoY})`; }
+        function updateOrthoLines() { /* ... (same as before, but uses correct scales) ... */
+             // Calculate scales for each canvas
+            const currentXYScaleX = xyCanvas.width / imageWidth;
+            const currentXYScaleY = xyCanvas.height / imageHeight;
+            const currentYZScaleY = yzCanvas.height / imageHeight;
+            const currentXZScaleX = xzCanvas.width / imageWidth;
+
+            // XY View lines
+            orthoLineX_xy.style.left = `${orthoX * currentXYScaleX}px`;
+            orthoLineY_xy.style.top = `${orthoY * currentXYScaleY}px`;
+            orthoLineX_xy.classList.remove('hidden');
+            orthoLineY_xy.classList.remove('hidden');
+
+            // YZ View line (Y position)
+            orthoLineY_yz.style.top = `${orthoY * currentYZScaleY}px`;
+            orthoLineY_yz.classList.remove('hidden');
+
+             // XZ View line (X position)
+            orthoLineX_xz.style.left = `${orthoX * currentXZScaleX}px`;
+            orthoLineX_xz.classList.remove('hidden'); }
+
+        // --- Line Dragging Interactions (Combined for XY and Z) ---
+        function setupLineInteractions() {
+            const lines = [
+                { element: xLineLeft, type: 'x', side: 'left', canvas: xyCanvas, dim: 'width' },
+                { element: xLineRight, type: 'x', side: 'right', canvas: xyCanvas, dim: 'width' },
+                { element: yLineTop, type: 'y', side: 'top', canvas: xyCanvas, dim: 'height' },
+                { element: yLineBottom, type: 'y', side: 'bottom', canvas: xyCanvas, dim: 'height' },
+                { element: zLineTopXZ, type: 'z', side: 'top', canvas: xzCanvas, dim: 'height' }, // Only XZ lines are draggable for Z
+                { element: zLineBottomXZ, type: 'z', side: 'bottom', canvas: xzCanvas, dim: 'height' }
+            ];
+
+            lines.forEach(lineInfo => {
+                lineInfo.element.onmousedown = (e) => startDraggingLine(e, lineInfo);
+            });
+
+            document.onmousemove = dragLine;
+            document.onmouseup = stopDraggingLine;
+            document.onmouseleave = stopDraggingLine;
+        }
+
+        function startDraggingLine(e, lineInfo) {
+            e.preventDefault();
+            draggingLine = lineInfo;
+            // Add class for visual feedback during drag (optional)
+            draggingLine.element.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
+        }
+
+        function dragLine(e) {
+            if (!draggingLine) return;
+
+            const rect = draggingLine.canvas.getBoundingClientRect();
+            let value;
+            let currentScale;
+
+            if (draggingLine.type === 'x') {
+                currentScale = xyCanvas.width / imageWidth;
+                value = Math.round((e.clientX - rect.left) / currentScale);
+                value = Math.max(0, Math.min(imageWidth, value)); // Clamp to image width
+                if (draggingLine.side === 'left') {
+                    cropParams.start_x = Math.min(value, cropParams.end_x - 1); // Ensure start < end
+                } else { // side === 'right'
+                    cropParams.end_x = Math.max(value, cropParams.start_x + 1); // Ensure end > start
+                }
+                updateXYLinesPosition();
+            } else if (draggingLine.type === 'y') {
+                currentScale = xyCanvas.height / imageHeight;
+                value = Math.round((e.clientY - rect.top) / currentScale);
+                value = Math.max(0, Math.min(imageHeight, value)); // Clamp to image height
+                if (draggingLine.side === 'top') {
+                    cropParams.start_y = Math.min(value, cropParams.end_y - 1);
+                } else { // side === 'bottom'
+                    cropParams.end_y = Math.max(value, cropParams.start_y + 1);
+                }
+                updateXYLinesPosition();
+            } else if (draggingLine.type === 'z') {
+                // Z dragging only happens relative to XZ canvas
+                currentScale = xzCanvas.height / imageDepth;
+                value = Math.round((e.clientY - rect.top) / currentScale);
+                value = Math.max(0, Math.min(imageDepth, value)); // Clamp to image depth
+                if (draggingLine.side === 'top') {
+                    cropParams.start_z = Math.min(value, cropParams.end_z - 1);
+                } else { // side === 'bottom'
+                    cropParams.end_z = Math.max(value, cropParams.start_z + 1);
+                }
+                updateZLinesPosition(); // Update both XZ and YZ lines visually
+            }
+            updateCropInfo();
+        }
+
+        function stopDraggingLine() {
+            if (draggingLine) {
+                 // Remove visual feedback class (optional)
+                 draggingLine.element.style.backgroundColor = ''; // Reset to CSS default
+                 draggingLine = null;
+                 updateCropInfo(); // Final update
+            }
+        }
+
+        function updateXYLinesPosition() {
+            const currentXYScaleX = xyCanvas.width / imageWidth;
+            const currentXYScaleY = xyCanvas.height / imageHeight;
+
+            xLineLeft.style.left = `${cropParams.start_x * currentXYScaleX}px`;
+            xLineRight.style.left = `${cropParams.end_x * currentXYScaleX}px`;
+            yLineTop.style.top = `${cropParams.start_y * currentXYScaleY}px`;
+            yLineBottom.style.top = `${cropParams.end_y * currentXYScaleY}px`;
+        }
+
+        function updateZLinesPosition() {
+            // Calculate scales for relevant canvases
+             const currentXZScaleZ = xzCanvas.height / imageDepth;
+             const currentYZScaleZ = yzCanvas.width / imageDepth; // Z is horizontal on YZ
+
+            // XZ View (Z is vertical, lines are horizontal)
+            zLineTopXZ.style.top = `${cropParams.start_z * currentXZScaleZ}px`;
+            zLineBottomXZ.style.top = `${cropParams.end_z * currentXZScaleZ}px`;
+
+            // YZ View (Z is horizontal, lines are vertical)
+            zLineTopYZ.style.left = `${cropParams.start_z * currentYZScaleZ}px`;
+            zLineBottomYZ.style.left = `${cropParams.end_z * currentYZScaleZ}px`;
+        }
+
+        // --- Info Updates & Output ---
+        function updateCropInfo() { /* ... (same as before) ... */
+             xRangeInfo.textContent = `[${cropParams.start_x}, ${cropParams.end_x})`;
+            yRangeInfo.textContent = `[${cropParams.start_y}, ${cropParams.end_y})`;
+            zRangeInfo.textContent = `[${cropParams.start_z}, ${cropParams.end_z})`; }
+        function generateAndDownloadConfig() { /* ... (same as before, includes Y) ... */
+             // Ensure end points are exclusive and valid
+            const configData = {
+                // input_dir: "REPLACE_WITH_INPUT_DIR", // Placeholder - maybe get from dirHandle?
+                // output_dir: "REPLACE_WITH_OUTPUT_DIR",// Placeholder
+                start_z: Math.max(0, cropParams.start_z),
+                end_z: Math.min(imageDepth, cropParams.end_z),
+                start_y: Math.max(0, cropParams.start_y), // Add Y crop
+                end_y: Math.min(imageHeight, cropParams.end_y), // Add Y crop
+                start_x: Math.max(0, cropParams.start_x),
+                end_x: Math.min(imageWidth, cropParams.end_x),
+                // workers: 12 // Default or placeholder
+            };
+
+             // Basic validation: ensure start < end
+            if (configData.start_z >= configData.end_z) { showError(`Invalid Z range: Start (${configData.start_z}) must be < End (${configData.end_z})`); return; }
+             if (configData.start_y >= configData.end_y) { showError(`Invalid Y range: Start (${configData.start_y}) must be < End (${configData.end_y})`); return; }
+             if (configData.start_x >= configData.end_x) { showError(`Invalid X range: Start (${configData.start_x}) must be < End (${configData.end_x})`); return; }
+            clearError(); // Clear previous errors if validation passes
+
+            const configString = JSON.stringify(configData, null, 4); // Pretty print JSON
+            configOutput.textContent = configString;
+            configOutput.classList.remove('hidden');
+
+            // Create blob and trigger download
+            const blob = new Blob([configString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'config.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url); }
+
+    </script>
+</body>
+</html>

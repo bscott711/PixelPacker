@@ -33,6 +33,7 @@ dependencies = [
     "typing_extensions>=4.0.0",
     "pyyaml>=6.0",
     "scikit-image>=0.19",
+    "napari>=0.6.0",
 ]
 
 [project.optional-dependencies]
