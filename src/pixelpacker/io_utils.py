@@ -23,7 +23,7 @@ except ImportError:
 
 
 # Import ContrastLimits for scaling debug MIPs
-from .data_models import VolumeLayout
+from .data_models import PreprocessingConfig, VolumeLayout
 from .stretch import ContrastLimits, apply_autocontrast_8bit, calculate_limits_only
 
 log = logging.getLogger(__name__)
@@ -722,21 +722,16 @@ def save_histogram_debug(
 
 
 # --- Main Channel Processing Function ---
-# process_channel remains the same
 def process_channel(
     time_id: str,
     ch_id: int,
     globally_cropped_vol: np.ndarray,
     layout: VolumeLayout,
     limits: ContrastLimits,
-    stretch_mode: str,
-    dry_run: bool = False,
-    debug: bool = False,
-    output_folder: str = ".",
+    config: PreprocessingConfig,
 ) -> Optional[Dict[str, Any]]:
     """
-    Processes a single channel: applies contrast, tiles using scikit-image montage
-    (or NumPy fallback), and saves.
+    Processes a single channel: applies contrast, generates MIP, tiles, and saves.
 
     Args:
         time_id: Identifier for the timepoint.
@@ -745,15 +740,12 @@ def process_channel(
                               to the global Z range.
         layout: The VolumeLayout defining the tiling grid.
         limits: The ContrastLimits to apply for stretching.
-        stretch_mode: The stretch mode name (used for histogram saving).
-        dry_run: If True, skip saving output files.
-        debug: If True, save debug histogram/preview.
-        output_folder: The base directory for saving output files.
+        config: The global configuration object.
 
     Returns:
         A dictionary with result metadata if successful, otherwise None.
     """
-    output_folder_obj = Path(output_folder)
+    output_folder_obj = config.output_folder
     log.info(
         "Processing T:%s C:%d - Received Globally Cropped Shape: %s",
         time_id,
@@ -779,7 +771,7 @@ def process_channel(
         )
 
         # 2. Save Debug Histogram (if needed)
-        if debug and not dry_run:
+        if config.debug and not config.dry_run:
             hist_filename = f"debug_hist_T{time_id}_C{ch_id}.png"
             hist_path = output_folder_obj / hist_filename
             debug_limits_for_hist = ContrastLimits(
@@ -788,13 +780,32 @@ def process_channel(
             debug_limits_for_hist.actual_min = limits.actual_min
             debug_limits_for_hist.actual_max = limits.actual_max
             save_histogram_debug(
-                globally_cropped_vol, debug_limits_for_hist, hist_path, stretch_mode
+                globally_cropped_vol,
+                debug_limits_for_hist,
+                hist_path,
+                config.stretch_mode,
             )
+
+        # 3. Save XY MIP if requested
+        if config.save_mip and not config.dry_run:
+            try:
+                log.debug(f"Generating XY MIP for T:{time_id} C:{ch_id}")
+                mip_xy = np.max(vol_8bit, axis=0)
+                if mip_xy.ndim == 2:
+                    mip_filename = f"mip_xy_T{time_id}_C{ch_id}.png"
+                    mip_path = output_folder_obj / mip_filename
+                    Image.fromarray(mip_xy).save(str(mip_path))
+                    log.info(f"Saved XY MIP to: {mip_path}")
+            except Exception as e:
+                log.error(
+                    f"Failed to generate or save XY MIP for T:{time_id} C:{ch_id}: {e}",
+                    exc_info=config.debug,
+                )
 
         out_file = f"volume_{time_id}_c{ch_id}.webp"
 
-        # 3. Perform Tiling using skimage.util.montage or NumPy fallback
-        if not dry_run:
+        # 4. Perform Tiling
+        if not config.dry_run:
             tiled_array: Optional[np.ndarray] = None
             use_skimage = SKIMAGE_AVAILABLE and skimage_montage is not None
 
@@ -833,11 +844,11 @@ def process_channel(
                     log.error(
                         "skimage.util.montage failed: %s. Falling back to NumPy loop.",
                         montage_e,
-                        exc_info=debug,
+                        exc_info=config.debug,
                     )
                     tiled_array = None  # Force fallback
 
-            # --- NumPy Fallback / Default Logic ---
+            # NumPy Fallback / Default Logic
             if tiled_array is None:
                 if use_skimage:  # Log only if fallback occurred
                     log.debug(
@@ -856,7 +867,6 @@ def process_channel(
                 num_slices_in_volume = vol_8bit.shape[0]
                 for i in range(layout.depth):  # Iterate up to expected layout depth
                     if i >= num_slices_in_volume:
-                        # Pad with zeros if volume is shallower than layout depth
                         log.debug(
                             "Padding tile grid for slice index %d (volume depth %d)",
                             i,
@@ -871,7 +881,6 @@ def process_channel(
                     x_start = paste_col * layout.width
                     x_end = x_start + layout.width
 
-                    # Bounds check for safety
                     if y_end > layout.tile_height or x_end > layout.tile_width:
                         log.error(
                             "NumPy Tiling: Calculated paste coords OOB [%d:%d, %d:%d] for slice %d. Skipping.",
@@ -896,9 +905,8 @@ def process_channel(
                             e,
                         )
                         continue
-            # --- End Tiling Logic ---
 
-            # 4. Convert final NumPy array to PIL Image
+            # 5. Convert final NumPy array to PIL Image
             log.debug(
                 "T:%s C:%d - Converting tiled NumPy array to PIL Image.", time_id, ch_id
             )
@@ -912,7 +920,7 @@ def process_channel(
                 )
                 return None
 
-            # 5. Save the Tiled Image
+            # 6. Save the Tiled Image
             out_path = output_folder_obj / out_file
             log.debug("Attempting to save tiled WebP image to: %s", out_path)
             try:
@@ -938,13 +946,13 @@ def process_channel(
                 log.error("Failed save WebP %s: %s", out_path, e, exc_info=True)
                 return None
 
-        # 6. Save Debug Preview (if needed)
-        if debug and not dry_run and ch_id == 0:
+        # 7. Save Debug Preview (if needed)
+        if config.debug and not config.dry_run and ch_id == 0:
             preview_filename = f"preview_T{time_id}_C{ch_id}.png"
             preview_path = output_folder_obj / preview_filename
             save_preview_slice(vol_8bit, preview_path)
 
-        # 7. Prepare Result Metadata
+        # 8. Prepare Result Metadata
         result_data = {
             "time_id": time_id,
             "channel": ch_id,

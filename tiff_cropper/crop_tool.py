@@ -255,9 +255,7 @@ def crop_z_x_stack_mem_efficient(
                                 f" {slice_data.ndim}. Original shape:"
                                 f" {original_shape}, axes: '{original_axes}'"
                             )
-                            logger.error(
-                                f"Error processing {input_path.name}: {msg}"
-                            )
+                            logger.error(f"Error processing {input_path.name}: {msg}")
                             output_path.unlink(missing_ok=True)
                             return False, msg
 
@@ -270,9 +268,7 @@ def crop_z_x_stack_mem_efficient(
                                 f" {slice_data.shape}. Original axes:"
                                 f" '{original_axes}'"
                             )
-                            logger.error(
-                                f"Error processing {input_path.name}: {msg}"
-                            )
+                            logger.error(f"Error processing {input_path.name}: {msg}")
                             output_path.unlink(missing_ok=True)
                             return False, msg
 
@@ -293,7 +289,9 @@ def crop_z_x_stack_mem_efficient(
                         logger.error(f"Error processing {input_path.name}: {msg}")
                         output_path.unlink(missing_ok=True)
                         return False, msg
-                    except Exception as e:  # Catch other errors during read/slice generation
+                    except (
+                        Exception
+                    ) as e:  # Catch other errors during read/slice generation
                         msg = f"Error preparing slice {z_or_stack_index}: {e}"
                         logger.error(
                             f"Error processing {input_path.name}: {msg}",
@@ -304,7 +302,7 @@ def crop_z_x_stack_mem_efficient(
 
                     # --- Get Photometric Interpretation ---
                     try:
-                        photometric_tag = page.tags.get( # type: ignore
+                        photometric_tag = page.tags.get(  # type: ignore
                             "PhotometricInterpretation"
                         )
                         input_photometric = (
@@ -355,9 +353,7 @@ def crop_z_x_stack_mem_efficient(
                             f" {cropped_slice.shape}). Skipping write for this"
                             " slice."
                         )
-                        logger.warning(
-                            f"Issue processing {input_path.name}: {msg}"
-                        )
+                        logger.warning(f"Issue processing {input_path.name}: {msg}")
                         continue
 
                     # --- Simple Write Call ---
@@ -632,10 +628,7 @@ def main(
         None,  # Default start X to None initially
         "--start-x",
         "-sx",
-        help=(
-            "Starting X pixel index (inclusive). Defaults to 0 if not in"
-            " config."
-        ),
+        help=("Starting X pixel index (inclusive). Defaults to 0 if not in config."),
         min=0,  # Keep validation constraint
         show_default="0 (or config)",  # Clarify default source
     ),
@@ -644,8 +637,7 @@ def main(
         "--end-x",
         "-ex",
         help=(
-            "Ending X pixel index (exclusive). Defaults to the full width of"
-            " the stack."
+            "Ending X pixel index (exclusive). Defaults to the full width of the stack."
         ),
         min=1,
         show_default="stack width",
@@ -773,10 +765,7 @@ def main(
             typer.echo(f"Loaded configuration from: {config_file}")
             logger.debug(f"Config file contents: {json.dumps(config, indent=2)}")
         except json.JSONDecodeError as e:
-            msg = (
-                "Error: Could not decode JSON from config file:"
-                f" {config_file}\n{e}"
-            )
+            msg = f"Error: Could not decode JSON from config file: {config_file}\n{e}"
             logger.error(msg)
             typer.secho(msg, fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1) from e
@@ -818,26 +807,17 @@ def main(
             raise ValueError("Input directory could not be determined.")
         final_input_dir = final_input_dir.resolve()
         if not final_input_dir.is_dir():
-            msg = (
-                "Error: Final input path is not a valid directory:"
-                f" {final_input_dir}"
-            )
+            msg = f"Error: Final input path is not a valid directory: {final_input_dir}"
             logger.error(msg)
             typer.secho(msg, fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
         if not os.access(final_input_dir, os.R_OK):
-            msg = (
-                "Error: Final input directory is not readable:"
-                f" {final_input_dir}"
-            )
+            msg = f"Error: Final input directory is not readable: {final_input_dir}"
             logger.error(msg)
             typer.secho(msg, fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
     except Exception as e:
-        msg = (
-            f"Error resolving or validating input directory"
-            f" '{final_input_dir}': {e}"
-        )
+        msg = f"Error resolving or validating input directory '{final_input_dir}': {e}"
         logger.error(msg, exc_info=True)
         typer.secho(msg, fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from e
@@ -847,9 +827,7 @@ def main(
         config_output = config.get("output_dir")
         if config_output and isinstance(config_output, str):
             final_output_dir = Path(config_output)
-            logger.info(
-                f"Using output directory from config file: {final_output_dir}"
-            )
+            logger.info(f"Using output directory from config file: {final_output_dir}")
         elif not no_gui:
             typer.echo("Output directory not specified, prompting for selection...")
             final_output_dir = prompt_for_directory(
@@ -903,9 +881,7 @@ def main(
         try:
             return int(value)
         except (ValueError, TypeError):
-            logger.warning(
-                f"Invalid value '{value}' for '{key}' in config. Ignoring."
-            )
+            logger.warning(f"Invalid value '{value}' for '{key}' in config. Ignoring.")
             return None
 
     # Start Z
@@ -920,8 +896,10 @@ def main(
             logger.debug(f"Using start_z={final_start_z} from config.")
         else:
             final_start_z = 0  # Default
-            if config_start_z is not None: # Log if config value was invalid
-                logger.warning(f"Invalid config start_z={config_start_z}. Using default 0.")
+            if config_start_z is not None:  # Log if config value was invalid
+                logger.warning(
+                    f"Invalid config start_z={config_start_z}. Using default 0."
+                )
             else:
                 logger.debug(f"Using default start_z={final_start_z}.")
 
@@ -937,11 +915,12 @@ def main(
             logger.debug(f"Using end_z={final_end_z} from config.")
         else:
             final_end_z = None  # Default (full depth)
-            if config_end_z is not None: # Log if config value was invalid
-                 logger.warning(f"Invalid or non-positive config end_z={config_end_z}. Using default (full depth).")
+            if config_end_z is not None:  # Log if config value was invalid
+                logger.warning(
+                    f"Invalid or non-positive config end_z={config_end_z}. Using default (full depth)."
+                )
             else:
-                 logger.debug("Using default end_z=None (full depth).")
-
+                logger.debug("Using default end_z=None (full depth).")
 
     # Start X
     final_start_x: Optional[int]
@@ -954,12 +933,13 @@ def main(
             final_start_x = config_start_x
             logger.debug(f"Using start_x={final_start_x} from config.")
         else:
-            final_start_x = 0 # Default
+            final_start_x = 0  # Default
             if config_start_x is not None:
-                 logger.warning(f"Invalid config start_x={config_start_x}. Using default 0.")
+                logger.warning(
+                    f"Invalid config start_x={config_start_x}. Using default 0."
+                )
             else:
-                 logger.debug(f"Using default start_x={final_start_x}.")
-
+                logger.debug(f"Using default start_x={final_start_x}.")
 
     # End X
     final_end_x: Optional[int]
@@ -972,9 +952,11 @@ def main(
             final_end_x = config_end_x
             logger.debug(f"Using end_x={final_end_x} from config.")
         else:
-            final_end_x = None # Default (full width)
+            final_end_x = None  # Default (full width)
             if config_end_x is not None:
-                logger.warning(f"Invalid or non-positive config end_x={config_end_x}. Using default (full width).")
+                logger.warning(
+                    f"Invalid or non-positive config end_x={config_end_x}. Using default (full width)."
+                )
             else:
                 logger.debug("Using default end_x=None (full width).")
 

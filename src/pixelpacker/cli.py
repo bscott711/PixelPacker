@@ -206,6 +206,12 @@ def main(  # noqa: PLR0913
             "--debug", help="Enable debug logging and save intermediate files."
         ),
     ] = False,
+    save_mip: Annotated[
+        bool,
+        typer.Option(
+            "--save-mip", help="Save a 2D XY max intensity projection for each output."
+        ),
+    ] = False,
     profile: Annotated[
         bool,
         typer.Option(
@@ -252,7 +258,7 @@ def main(  # noqa: PLR0913
             "output_folder": "output_folder",
             "input_pattern": "input_pattern",
             "stretch_mode": "stretch_mode",
-            "enable_z_crop": "enable_z_crop",  # <<< ADDED
+            "enable_z_crop": "enable_z_crop",
             "z_crop_method": "z_crop_method",
             "z_crop_threshold": "z_crop_threshold",
             "per_image_contrast": "use_global_contrast",
@@ -260,6 +266,7 @@ def main(  # noqa: PLR0913
             "threads": "max_threads",
             "dry_run": "dry_run",
             "debug": "debug",
+            "save_mip": "save_mip",
         }
 
         log.debug("Step 1: Initializing config with Typer defaults...")
@@ -312,7 +319,8 @@ def main(  # noqa: PLR0913
                                 "dry_run",
                                 "debug",
                                 "enable_z_crop",
-                            ]  # <<< ADDED enable_z_crop
+                                "save_mip",
+                            ]
                             and value is not None
                         ):
                             # Explicitly handle boolean conversion robustly

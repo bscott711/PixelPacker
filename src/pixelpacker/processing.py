@@ -28,7 +28,6 @@ def _task_process_channel(
 ) -> Optional[ProcessingResult]:
     """
     Pass 2 Task: Takes a cropped volume from Pass 1, applies contrast, tiles, and saves.
-
     Args:
         pass1_result: The result object from Pass 1 containing the cropped volume
                       and per-image contrast limits.
@@ -36,7 +35,6 @@ def _task_process_channel(
         config: The global preprocessing configuration.
         global_contrast_override: Optional tuple (low, high) to use instead of
                                   the per-image limits from pass1_result.
-
     Returns:
         ProcessingResult metadata if successful, None otherwise.
     """
@@ -52,8 +50,7 @@ def _task_process_channel(
         if globally_cropped_volume is None:
             # This shouldn't happen if Pass 1 filtering works, but check defensively
             log.warning(
-                f"Pass 2 - Missing globally cropped volume for T:{time_id} C:{channel}."
-                " Skipping."
+                f"Pass 2 - Missing globally cropped volume for T:{time_id} C:{channel}. Skipping."
             )
             return None
 
@@ -68,8 +65,7 @@ def _task_process_channel(
             final_limits = ContrastLimits(
                 p_low=global_contrast_override[0], p_high=global_contrast_override[1]
             )
-            # Carry over actual min/max from original calculation if needed for metadata/debugging
-            # (though process_channel might recalculate if absolutely necessary)
+            # Carry over actual min/max from original calculation
             final_limits.actual_min = pass1_result.limits.actual_min
             final_limits.actual_max = pass1_result.limits.actual_max
         else:
@@ -81,18 +77,14 @@ def _task_process_channel(
                     f" for C:{channel}. Falling back to per-image limits for T:{time_id}."
                 )
 
-        # Call the core processing function (from io_utils)
+        # Call the core processing function (from io_utils) with the corrected arguments
         result_dict = process_channel(
             time_id=time_id,
             ch_id=channel,
-            # Pass the already cropped volume
             globally_cropped_vol=globally_cropped_volume,
             layout=layout,
             limits=final_limits,
-            stretch_mode=config.stretch_mode,
-            dry_run=config.dry_run,
-            debug=config.debug,
-            output_folder=str(config.output_folder),  # Ensure output path is string
+            config=config,
         )
 
         # Check if processing was successful
@@ -125,7 +117,7 @@ def _task_process_channel(
         return None
     finally:
         # VERY IMPORTANT: Clean up the large volume data from the Pass 1 result
-        # after this task is done with it. This prevents memory ballooning.
+        # after this task is done with it. This prevents memory ballooning. [cite: 496, 497]
         if hasattr(pass1_result, "globally_cropped_volume"):
             del pass1_result.globally_cropped_volume
             pass1_result.globally_cropped_volume = None

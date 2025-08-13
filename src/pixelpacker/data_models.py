@@ -53,7 +53,8 @@ class PreprocessingConfig:
     use_global_contrast: bool = True
     executor_type: Literal["thread", "process"] = "process"
     input_pattern: str = "*_ch*_stack*.tif*"
-    enable_z_crop: bool = False  # <<< ADDED: Default to False (no cropping)
+    enable_z_crop: bool = False
+    save_mip: bool = False
 
 
 @dataclass
