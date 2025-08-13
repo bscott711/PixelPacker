@@ -23,7 +23,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
-    "typer>=0.9.0",
+    "typer>=0.10.0",
     "matplotlib>=3.7,<4.0",
     "numpy>=1.21,<3.0",
     "pillow>=10.0,<12.0",
