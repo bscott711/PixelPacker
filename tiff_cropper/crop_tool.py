@@ -122,16 +122,17 @@ def crop_z_x_stack_mem_efficient(
     x_end: Optional[int],
 ) -> Tuple[bool, Optional[str]]:
     """
-    Reads a TIFF stack slice by slice, crops the first (stack/Z) dimension
-    and the 'X' dimension (last spatial dim if not named 'X'), saves the result.
+    Reads a TIFF stack slice by slice (page by page), crops the 'Z' (page)
+    dimension and the 'X' dimension (last spatial dim if not named 'X'),
+    saves the result.
 
     Args:
         input_path: Path to the input TIFF file.
         output_path: Path where the cropped TIFF file will be saved.
-        z_start: Starting slice index of the first dimension (inclusive).
+        z_start: Starting slice index (page number) (inclusive).
                  Defaults to 0 if None.
-        z_end: Ending slice index of the first dimension (exclusive).
-               Defaults to stack depth if None.
+        z_end: Ending slice index (page number) (exclusive).
+               Defaults to number of pages if None.
         x_start: Starting pixel index of the X dimension (inclusive).
                  Defaults to 0 if None.
         x_end: Ending pixel index of the X dimension (exclusive).
@@ -145,81 +146,57 @@ def crop_z_x_stack_mem_efficient(
     try:
         with tifffile.TiffFile(input_path) as tif:
             # --- Get Metadata and Validate ---
-            if not tif.series or not tif.series[0].shape:
-                msg = "Could not find image series or shape."
+            if not tif.pages:
+                msg = "Could not find image pages."
                 logger.warning(f"Skipping {input_path.name}: {msg}")
                 return False, msg
 
-            series = tif.series[0]
-            original_shape = series.shape
-            original_axes = (
-                series.axes.upper() if series.axes else ""
-            )  # Ensure uppercase, handle None axes
-
-            # Basic validation: Require >= 3 dimensions for cropping first (Z/stack) and one spatial (X)
-            if len(original_shape) < 3:
-                msg = (
-                    f"Unsupported shape {original_shape}. Requires at least 3"
-                    f" dimensions for Z/Stack and X cropping (axes:"
-                    f" '{series.axes}')."
-                )
+            # --- Identify Dimension Indices based on FIRST PAGE ---
+            # Assume all pages in the stack have the same shape/axes
+            try:
+                first_page = tif.pages[0]
+                page_shape = first_page.shape
+                page_axes = first_page.axes.upper() if first_page.axes else ""
+                page_ndim = first_page.ndim
+            except Exception as e:
+                msg = f"Could not read metadata from first page. Error: {e}"
                 logger.warning(f"Skipping {input_path.name}: {msg}")
                 return False, msg
 
-            # --- Identify Dimension Indices ---
-            # Assume first dimension is Z/stack dimension
-            z_dim_index = 0
-            num_z_or_stack = original_shape[z_dim_index]
+            # Number of slices is the number of pages
+            num_z_or_stack = len(tif.pages)
             logger.debug(
-                f"'{input_path.name}': Assuming first dimension (index"
-                f" {z_dim_index}, size {num_z_or_stack}) is the stack/Z"
-                f" dimension. Original axes: '{original_axes}'."
+                f"'{input_path.name}': Found {num_z_or_stack} pages (slices)."
+                f" First page shape: {page_shape}, axes: '{page_axes}'."
             )
 
-            # Find X dimension index in the original axes string
-            x_dim_original_index = original_axes.find("X")
-            if x_dim_original_index == -1:
-                # Assumption: If 'X' not explicitly named, assume it's the LAST dimension
-                x_dim_original_index = len(original_shape) - 1
+            # Find X dimension index in the PAGE axes string
+            x_dim_slice_index = page_axes.find("X")
+            if x_dim_slice_index == -1:
+                # Assumption: If 'X' not named, assume it's the LAST dimension of the page
+                x_dim_slice_index = page_ndim - 1
                 logger.debug(
-                    f"'{input_path.name}': 'X' axis not found in"
-                    f" '{original_axes}'. Assuming last dimension (index"
-                    f" {x_dim_original_index}) is X."
+                    f"'{input_path.name}': 'X' axis not found in page"
+                    f" axes '{page_axes}'. Assuming last dimension (index"
+                    f" {x_dim_slice_index}) is X."
                 )
-            elif x_dim_original_index == z_dim_index:
-                # Check if 'X' conflicts with the assumed stack dimension
-                msg = (
-                    f"Detected 'X' axis ('{original_axes}') conflicts with"
-                    f" assumed Z/stack axis (index {z_dim_index})."
-                )
-                logger.warning(f"Skipping {input_path.name}: {msg}")
-                return False, msg
             else:
                 logger.debug(
-                    f"'{input_path.name}': Found 'X' axis at original index"
-                    f" {x_dim_original_index} in '{original_axes}'."
+                    f"'{input_path.name}': Found 'X' axis at index"
+                    f" {x_dim_slice_index} in page axes '{page_axes}'."
                 )
 
-            width_x = original_shape[x_dim_original_index]
-
-            # Determine the index of X within the slice data (shape after removing Z/stack dim)
-            # If X's original index was > 0, its index in the slice data (shape[1:]) is original_index - 1.
-            if x_dim_original_index > z_dim_index:  # Ensure X wasn't the stack dim
-                x_dim_slice_index = x_dim_original_index - 1
-                logger.debug(
-                    f"'{input_path.name}': Calculated X index within slice data:"
-                    f" {x_dim_slice_index}."
-                )
-            else:
-                # This case should have been caught by the conflict check, but log defensively.
+            # Ensure index is valid for the page shape
+            if not (0 <= x_dim_slice_index < page_ndim):
                 msg = (
-                    f"Internal logic error: X dimension index"
-                    f" ({x_dim_original_index}) is not greater than Z/stack"
-                    f" dimension index ({z_dim_index}). Axes:"
-                    f" '{original_axes}'"
+                    f"Calculated X dimension index ({x_dim_slice_index})"
+                    f" is out of bounds for page dimensions ({page_ndim})."
+                    f" Page shape: {page_shape}, Page axes: '{page_axes}'"
                 )
                 logger.error(f"Error processing {input_path.name}: {msg}")
                 return False, msg
+
+            width_x = page_shape[x_dim_slice_index]
 
             # --- Determine Effective Crop Ranges ---
             eff_z_start = max(0, z_start if z_start is not None else 0)
@@ -247,30 +224,35 @@ def crop_z_x_stack_mem_efficient(
                         slice_data = page.asarray()
 
                         # --- Dynamic Slicing for X Crop ---
-                        expected_slice_ndim = len(original_shape) - 1
-                        if slice_data.ndim != expected_slice_ndim:
+                        if slice_data.ndim != page_ndim:
                             msg = (
                                 f"Slice {z_or_stack_index} dimension mismatch."
-                                f" Expected {expected_slice_ndim} dims, got"
-                                f" {slice_data.ndim}. Original shape:"
-                                f" {original_shape}, axes: '{original_axes}'"
+                                f" Expected {page_ndim} dims (from first page), got"
+                                f" {slice_data.ndim}. Slice shape:"
+                                f" {slice_data.shape}."
                             )
                             logger.error(f"Error processing {input_path.name}: {msg}")
                             output_path.unlink(missing_ok=True)
                             return False, msg
 
-                        # Ensure calculated slice index is valid for the actual slice data shape
-                        if not (0 <= x_dim_slice_index < slice_data.ndim):
+                        # Check if page shape X dim matches first page's X dim
+                        if slice_data.shape[x_dim_slice_index] != width_x:
                             msg = (
-                                f"Calculated X dimension index ({x_dim_slice_index})"
-                                f" is out of bounds for slice data dimensions"
-                                f" ({slice_data.ndim}). Slice shape:"
-                                f" {slice_data.shape}. Original axes:"
-                                f" '{original_axes}'"
+                                f"Slice {z_or_stack_index} X dimension size"
+                                f" ({slice_data.shape[x_dim_slice_index]})"
+                                f" differs from first page X size ({width_x})."
+                                " Cannot process inconsistent stack."
                             )
                             logger.error(f"Error processing {input_path.name}: {msg}")
                             output_path.unlink(missing_ok=True)
                             return False, msg
+                        elif slice_data.shape != page_shape:
+                            # Harmless warning if other dims differ
+                            logger.warning(
+                                f"'{input_path.name}': Slice {z_or_stack_index} shape"
+                                f" {slice_data.shape} differs from first page"
+                                f" {page_shape}. Proceeding with crop."
+                            )
 
                         # Build the slicing tuple dynamically
                         crop_slice_tuple = [slice(None)] * slice_data.ndim

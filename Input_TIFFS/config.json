@@ -1,0 +1,11 @@
+{
+  "input_dir": "/Users/minesbioimaging/dev/PixelPacker/Input_TIFFS",
+  "output_dir": "/Users/minesbioimaging/dev/PixelPacker/Cropped_Output",
+  "start_z": 15,
+  "end_z": 158,
+  "start_x": 92,
+  "end_x": 641,
+  "start_y": 158,
+  "end_y": 696,
+  "workers": 12
+}
