@@ -13,7 +13,7 @@ from pixelpacker import __version__
 
 @pytest.fixture
 def runner() -> CliRunner:
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 # --- Tests for basic CLI invocation ---
